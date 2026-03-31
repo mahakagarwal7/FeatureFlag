@@ -1,0 +1,138 @@
+# =========================
+# PYTHON
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# =========================
+# VIRTUAL ENVIRONMENTS
+# =========================
+venv/
+ENV/
+env/
+.venv/
+
+# =========================
+# IDE & EDITORS
+# =========================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+
+# =========================
+# ENVIRONMENT VARIABLES (CRITICAL!)
+# =========================
+.env
+.env.local
+.env.*.local
+*.env
+
+# =========================
+# SECRETS & CREDENTIALS
+# =========================
+*.pem
+*.key
+secrets.json
+credentials.json
+service_account.json
+
+# =========================
+# TESTING & COVERAGE
+# =========================
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# =========================
+# LOGS
+# =========================
+logs/
+*.log
+traceback.log
+
+# =========================
+# OS FILES
+# =========================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# =========================
+# JUPYTER NOTEBOOKS
+# =========================
+.ipynb_checkpoints/
+
+# =========================
+# MYPY & TYPE CHECKING
+# =========================
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# =========================
+# DOCKER
+# =========================
+.docker/
+docker-compose*.yml
+
+# =========================
+# HUGGING FACE
+# =========================
+.huggingface/
+hf_space_config.json
+
+# =========================
+# MODEL CHECKPOINTS (Optional - if training locally)
+# =========================
+checkpoints/
+*.pt
+*.pth
+*.bin
+*.onnx
+
+# =========================
+# DOCUMENTATION BUILD
+# =========================
+docs/_build/
+
+# =========================
+# TEMPORARY FILES
+# =========================
+tmp/
+temp/
+*.tmp
+*.bak

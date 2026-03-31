@@ -1,0 +1,31 @@
+# =============================================================================
+# PYTHON DEPENDENCIES
+# =============================================================================
+# Core dependencies for the Feature Flag Agent Environment
+# =============================================================================
+
+# Data Validation
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+
+# Web Server
+fastapi>=0.100.0
+uvicorn>=0.23.0
+
+# Math & Simulation
+numpy>=1.24.0
+
+# LLM Integration
+groq>=0.4.0
+openai>=1.0.0
+
+# Utilities
+python-dotenv>=1.0.0
+httpx>=0.24.0
+
+# Testing
+pytest>=7.0.0
+
+# Development (optional)
+# black>=23.0.0
+# flake8>=6.0.0
