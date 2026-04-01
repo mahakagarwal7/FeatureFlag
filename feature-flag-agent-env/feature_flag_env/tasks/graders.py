@@ -50,11 +50,8 @@ class Task1Grader(BaseGrader):
         
         # ========== 1. ROLLOUT ACHIEVEMENT (40%) ==========
         target_rollout = 25.0
-        rollout_score = self._normalize(
-            final_obs.current_rollout_percentage,
-            0.0,
-            target_rollout
-        )
+        rollout_error = abs(final_obs.current_rollout_percentage - target_rollout)
+        rollout_score = max(0.0, 1.0 - rollout_error / target_rollout)
         
         # ========== 2. ERROR RATE COMPLIANCE (30%) ==========
         max_error_threshold = 0.05  # 5%
@@ -65,7 +62,7 @@ class Task1Grader(BaseGrader):
         
         # ========== 3. STEP EFFICIENCY (20%) ==========
         max_steps = 10
-        step_score = max(0.0, 1.0 - (num_steps / max_steps))
+        step_score = max(0.0, 1.0 - ((num_steps - 1) / max_steps))
         
         # ========== 4. NO ROLLBACKS (10%) ==========
         has_rollback = any(

@@ -19,16 +19,33 @@ from typing import Optional, Dict, Any, Literal
 from contextlib import asynccontextmanager
 import uvicorn
 import os
+import sys
+from pathlib import Path
 
 # Import our environment and models
-from feature_flag_env.server.feature_flag_environment import FeatureFlagEnvironment
-from feature_flag_env.models import (
-    FeatureFlagAction,
-    FeatureFlagObservation,
-    FeatureFlagState,
-    StepResponse,
-    ResetResponse
-)
+try:
+    from feature_flag_env.server.feature_flag_environment import FeatureFlagEnvironment
+    from feature_flag_env.models import (
+        FeatureFlagAction,
+        FeatureFlagObservation,
+        FeatureFlagState,
+        StepResponse,
+        ResetResponse
+    )
+except ModuleNotFoundError:
+    # Support direct execution: `python feature_flag_env/server/app.py`
+    project_root = Path(__file__).resolve().parents[2]
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
+
+    from feature_flag_env.server.feature_flag_environment import FeatureFlagEnvironment
+    from feature_flag_env.models import (
+        FeatureFlagAction,
+        FeatureFlagObservation,
+        FeatureFlagState,
+        StepResponse,
+        ResetResponse
+    )
 
 
 # =========================
@@ -302,7 +319,7 @@ async def get_environment_info():
 if __name__ == "__main__":
     """
     Run the server directly with:
-    python feature_flag_env/server/app.py
+    python -m feature_flag_env.server.app
     
     Or with uvicorn:
     uvicorn feature_flag_env.server.app:app --host 0.0.0.0 --port 8000

@@ -10,6 +10,7 @@ Usage:
     python inference.py --agent baseline --episodes 5
     python inference.py --agent llm --episodes 5
     python inference.py --agent hybrid --episodes 5
+    python inference.py --agent rl --episodes 5
 
 Hackathon Requirement: Must run without errors and produce reproducible scores.
 """
@@ -215,16 +216,27 @@ class EnvironmentClient:
     
     Can connect to local server or use environment directly.
     """
-    
-    def __init__(self, use_server: bool = False, server_url: str = "http://localhost:8000"):
+
+    def __init__(self, use_server: bool = False, server_url: str = "http://localhost:8000", task: str = "task1"):
         self.use_server = use_server
         self.server_url = server_url
         self.env = None
-        
+        self.task = task
+
         if not use_server:
-            # Use environment directly
-            from feature_flag_env.server.feature_flag_environment import FeatureFlagEnvironment
-            self.env = FeatureFlagEnvironment()
+            # Use task-specific direct environment when possible
+            if task == "task1":
+                from feature_flag_env.tasks.task1_safe_rollout import make_task1_environment
+                self.env = make_task1_environment()
+            elif task == "task2":
+                from feature_flag_env.tasks.task2_risk_aware import make_task2_environment
+                self.env = make_task2_environment()
+            elif task == "task3":
+                from feature_flag_env.tasks.task3_multi_objective import make_task3_environment
+                self.env = make_task3_environment()
+            else:
+                from feature_flag_env.server.feature_flag_environment import FeatureFlagEnvironment
+                self.env = FeatureFlagEnvironment(scenario_config={"task_name": task})
     
     def reset(self) -> FeatureFlagObservation:
         """Reset environment"""
@@ -268,7 +280,7 @@ class EnvironmentClient:
 # =============================================================================
 # MAIN RUNNER
 # =============================================================================
-def run_episode(agent, env_client, task: str = "task1") -> Dict[str, Any]:
+def run_episode(agent, env_client, task: str = "task1", debug: bool = False) -> Dict[str, Any]:
     """
     Run one episode and return results.
     
@@ -295,6 +307,10 @@ def run_episode(agent, env_client, task: str = "task1") -> Dict[str, Any]:
     
     step_count = 0
     while not obs.done and step_count < 50:
+        if debug:
+            state_done = env_client.env.state().done if (not env_client.use_server and env_client.env is not None) else None
+            print(f"   [DEBUG] Loop start: step_count={step_count}, obs.done={obs.done}, state.done={state_done}")
+
         # Agent decides action
         action = agent.decide(obs, history)
         
@@ -313,12 +329,21 @@ def run_episode(agent, env_client, task: str = "task1") -> Dict[str, Any]:
         # Print step summary
         print(f"   ⏩ Step {step_count + 1}: {action.action_type} → {action.target_percentage}%")
         print(f"      Reward: {reward:+.2f} | Errors: {obs.error_rate*100:.2f}% | Health: {obs.system_health_score:.2f}")
+        if debug:
+            print(f"      [DEBUG] done={done}, info.done_reason={info.get('done_reason', '')}")
         
         step_count += 1
         
         if done:
             break
     
+    # Final agent episode callback (optional)
+    if hasattr(agent, "on_episode_end"):
+        try:
+            agent.on_episode_end(obs)
+        except Exception:
+            pass
+
     # Grade trajectory
     grader = get_grader(task)
     score = grader.grade(trajectory)
@@ -347,7 +372,7 @@ def main():
         "--agent",
         type=str,
         default="baseline",
-        choices=["baseline", "llm", "hybrid"],
+        choices=["baseline", "llm", "hybrid", "rl"],
         help="Agent type to use"
     )
     parser.add_argument(
@@ -359,7 +384,7 @@ def main():
     parser.add_argument(
         "--task",
         type=str,
-        default="task1",
+        default="task3",
         choices=["task1", "task2", "task3"],
         help="Task to evaluate on"
     )
@@ -369,10 +394,26 @@ def main():
         help="Use HTTP server instead of direct environment"
     )
     parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Print step-level done diagnostics"
+    )
+    parser.add_argument(
         "--server-url",
         type=str,
         default="http://localhost:8000",
         help="Server URL if using HTTP"
+    )
+    parser.add_argument(
+        "--rl-model",
+        type=str,
+        default=None,
+        help="Path to RL model checkpoint for inference (optional)"
+    )
+    parser.add_argument(
+        "--rl-train-mode",
+        action="store_true",
+        help="Run RL agent in training/exploration mode during inference"
     )
     
     args = parser.parse_args()
@@ -386,21 +427,32 @@ def main():
     print(f"   Use Server: {args.use_server}")
     print("=" * 60)
     
-    # Create agent
-    if args.agent == "baseline":
-        agent = BaselineAgent()
-        print("✅ Using Baseline Agent (Rule-Based)")
-    elif args.agent == "llm":
-        agent = LLMAgent()
-        print("✅ Using LLM Agent (Groq)")
-    elif args.agent == "hybrid":
-        agent = HybridAgent()
-        print("✅ Using Hybrid Agent (LLM + Safety)")
+    if args.agent == "rl":
+        from agents.rl_agent import RLAgent
+        if args.rl_train_mode:
+            agent = RLAgent(task=args.task, model_path=args.rl_model, training=True)
+            print("⚠️ RL running in training mode (exploration enabled)")
+        else:
+            agent = RLAgent(
+                task=args.task,
+                model_path=args.rl_model,
+                training=False,
+                epsilon=0.0,
+                epsilon_min=0.0,
+            )
+            agent.epsilon = 0.0
+            print("✅ RL running in evaluation mode (deterministic policy)")
+    else:
+        from agents.factory import get_agent
+        agent = get_agent(args.agent)
+
+    print(f"✅ Using {args.agent.upper()} Agent")
     
     # Create environment client
     env_client = EnvironmentClient(
         use_server=args.use_server,
-        server_url=args.server_url
+        server_url=args.server_url,
+        task=args.task
     )
     
     # Run episodes
@@ -410,9 +462,15 @@ def main():
         print(f"📍 Episode {i + 1}/{args.episodes}")
         print("=" * 60)
         
-        result = run_episode(agent, env_client, task=args.task)
+        result = run_episode(agent, env_client, task=args.task, debug=args.debug)
         scores.append(result["score"])
-    
+
+        if hasattr(agent, "decay_epsilon"):
+            agent.decay_epsilon()
+
+        if hasattr(agent, "reset"):
+            agent.reset()
+            
     # Summary
     print("\n" + "=" * 60)
     print("📊 FINAL SUMMARY")

@@ -59,6 +59,11 @@ class Task1SafeRolloutEnvironment(FeatureFlagEnvironment):
         
         return observation
 
+    def _check_done(self, observation, action) -> bool:
+        if self.task_config and observation.current_rollout_percentage >= self.task_config["target_rollout"]:
+            return True
+        return super()._check_done(observation, action)
+
 
 def make_task1_environment() -> Task1SafeRolloutEnvironment:
     """

@@ -12,7 +12,12 @@ from feature_flag_env.models import (
     StepResponse,
 )
 from feature_flag_env.server.simulation_engine import FeatureFlagSimulator
-from feature_flag_env.utils.reward_functions import calculate_reward
+from feature_flag_env.utils.reward_functions import (
+    calculate_reward,
+    calculate_reward_task1,
+    calculate_reward_task2,
+    calculate_reward_task3,
+)
 import uuid
 import random
 
@@ -66,8 +71,21 @@ class FeatureFlagEnvironment:
    
     def reset(self) -> FeatureFlagObservation:
         if self.scenario_config:
-            config = self.scenario_config
-            scenario_name = config.get("name", "custom")
+            # Support passing either a full scenario config or a task name.
+            if "scenario_name" in self.scenario_config:
+                scenario_name = self.scenario_config["scenario_name"]
+                config = self.scenario_library.get(scenario_name, self.scenario_library["stable"])
+            elif "task_name" in self.scenario_config:
+                task_to_scenario = {
+                    "task1": "stable",
+                    "task2": "moderate_risk",
+                    "task3": "high_risk",
+                }
+                scenario_name = task_to_scenario.get(self.scenario_config["task_name"], "stable")
+                config = self.scenario_library[scenario_name]
+            else:
+                config = self.scenario_config
+                scenario_name = config.get("name", "custom")
         else:
             scenario_name = random.choice(list(self.scenario_library.keys()))
             config = self.scenario_library[scenario_name]
@@ -79,7 +97,11 @@ class FeatureFlagEnvironment:
         self._state = FeatureFlagState(
             episode_id=str(uuid.uuid4()),
             step_count=0,
-            max_steps=50,
+            max_steps={
+                "easy": 10,
+                "medium": 30,
+                "hard": 50,
+            }.get(self._get_difficulty(scenario_name), 50),
             total_reward=0.0,
             rollout_history=[],
             action_history=[],
@@ -142,6 +164,15 @@ class FeatureFlagEnvironment:
 
         
         reward = calculate_reward(old_obs, observation, action)
+        # Task-aligned reward:
+        # The graders evaluate task-specific objectives, so the training reward should
+        # be consistent with the task difficulty of the chosen scenario.
+        if self._state.difficulty == "easy":
+            reward = calculate_reward_task1(old_obs, observation, action)
+        elif self._state.difficulty == "medium":
+            reward = calculate_reward_task2(old_obs, observation, action)
+        elif self._state.difficulty == "hard":
+            reward = calculate_reward_task3(old_obs, observation, action)
         
        
         self._state.total_reward += reward
@@ -163,6 +194,7 @@ class FeatureFlagEnvironment:
                 "difficulty": self._state.difficulty,
                 "step_count": self._state.step_count,
                 "total_reward": self._state.total_reward,
+                "done_reason": self._get_done_reason(observation, action) if done else "",
             },
         )
 
@@ -196,10 +228,16 @@ class FeatureFlagEnvironment:
         if action.target_percentage >= 100.0:
             return True
 
-        if action.action_type == "ROLLBACK" and action.target_percentage == 0.0:
-            return True
-
         return False
+
+    def _get_done_reason(self, observation, action) -> str:
+        if self._state.step_count >= self._state.max_steps:
+            return "max_steps_reached"
+        if observation.error_rate > 0.25:
+            return "catastrophic_error_rate"
+        if action.target_percentage >= 100.0:
+            return "full_rollout_requested"
+        return "task_or_env_condition"
 
 
 
