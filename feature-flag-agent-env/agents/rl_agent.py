@@ -248,7 +248,7 @@ class RLAgent:
         rollout = float(observation.current_rollout_percentage)
         error = float(observation.error_rate)
 
-        # Anti-stall: when rollout is low and system is healthy, force gradual increase.
+       
         if rollout < 60.0 and error < 0.05 and action_idx != 0:
             self.action_safety_overrides += 1
             return 0
