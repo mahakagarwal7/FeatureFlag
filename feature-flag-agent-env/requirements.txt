@@ -14,6 +14,7 @@ uvicorn>=0.23.0
 
 # Math & Simulation
 numpy>=1.24.0
+torch>=2.0.0
 
 # LLM Integration
 groq>=0.4.0

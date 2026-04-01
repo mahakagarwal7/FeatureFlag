@@ -13,8 +13,43 @@ Reward Design Principles:
 4. Task-aware: Different tasks may need different reward weighting
 """
 
+import os
 from feature_flag_env.models import FeatureFlagAction, FeatureFlagObservation
 from typing import Tuple
+
+
+def _get_reward_clip_config() -> Tuple[bool, float, float]:
+    """Read reward clipping configuration from environment variables.
+
+    Defaults are enabled clipping in [-1.0, 1.0].
+    Set FEATURE_FLAG_REWARD_CLIP=0 to disable clipping.
+    """
+    enabled_raw = os.getenv("FEATURE_FLAG_REWARD_CLIP", "1").strip().lower()
+    enabled = enabled_raw not in {"0", "false", "no", "off"}
+
+    clip_min_raw = os.getenv("FEATURE_FLAG_REWARD_CLIP_MIN", "-1.0")
+    clip_max_raw = os.getenv("FEATURE_FLAG_REWARD_CLIP_MAX", "1.0")
+
+    try:
+        clip_min = float(clip_min_raw)
+    except ValueError:
+        clip_min = -1.0
+    try:
+        clip_max = float(clip_max_raw)
+    except ValueError:
+        clip_max = 1.0
+
+    if clip_min > clip_max:
+        clip_min, clip_max = clip_max, clip_min
+
+    return enabled, clip_min, clip_max
+
+
+def _clip_reward(reward: float) -> float:
+    enabled, clip_min, clip_max = _get_reward_clip_config()
+    if not enabled:
+        return float(reward)
+    return float(max(clip_min, min(clip_max, reward)))
 
 
 def calculate_reward(
@@ -135,7 +170,7 @@ def calculate_reward(
             reward -= 0.4
         else:
             reward -= 0.1
-    return float(reward)
+    return _clip_reward(reward)
 
 
 # =============================================================================
@@ -168,7 +203,7 @@ def calculate_reward_conservative(
     # Step penalty (encourage fewer actions)
     reward -= 0.02
     
-    return float(reward)
+    return _clip_reward(reward)
 
 
 def calculate_reward_aggressive(
@@ -197,7 +232,7 @@ def calculate_reward_aggressive(
     # Adoption bonus
     reward += 0.3 * new_observation.user_adoption_rate
     
-    return float(reward)
+    return _clip_reward(reward)
 
 
 # =============================================================================
@@ -243,7 +278,7 @@ def calculate_reward_task1(
     if action.action_type == "FULL_ROLLOUT":
         reward -= 2.0
 
-    return float(reward)
+    return _clip_reward(reward)
 
 
 def calculate_reward_task2(
@@ -260,27 +295,67 @@ def calculate_reward_task2(
     - Recovery after incidents
     """
     reward = 0.0
-
-    # Progress toward 75% goal
     target = 75.0
-    progress = min(new_observation.current_rollout_percentage / target, 1.0)
-    reward += 1.5 * progress
 
-    # Incident response bonus (decrease rollout when errors high)
-    if old_observation.error_rate > 0.10 and action.target_percentage < old_observation.current_rollout_percentage:
-        reward += 0.5  # Good response to incident!
+    old_rollout = old_observation.current_rollout_percentage
+    new_rollout = new_observation.current_rollout_percentage
+    rollout_delta = new_rollout - old_rollout
 
-    # Error penalty
-    reward -= new_observation.error_rate * 5.0
+    # Reward movement toward the 75% target (not toward 100%).
+    old_distance = abs(target - old_rollout)
+    new_distance = abs(target - new_rollout)
+    if new_distance < old_distance:
+        reward += 0.6
+    elif new_distance > old_distance:
+        reward -= 0.3
 
-    # Actively discourage unnecessary rollbacks for reward gaming
+    # Penalize stalling far below target to avoid zero-rollout reward gaming.
+    if rollout_delta <= 0 and new_rollout < 60.0:
+        reward -= 0.2
+
+    # Bonus band around target and explicit overshoot penalty.
+    if 70.0 <= new_rollout <= 80.0:
+        reward += 0.6
+    if new_rollout > 90.0:
+        reward -= 1.0
+
+    # Encourage gradual scaling (10-20% per step); discourage large jumps.
+    if rollout_delta > 0:
+        if 10.0 <= rollout_delta <= 20.0:
+            reward += 0.25
+        elif rollout_delta > 50.0:
+            reward -= 0.8
+        elif rollout_delta > 20.0:
+            reward -= 0.25
+
+    # Risk-aware response: when errors are high, reducing rollout is good behavior.
+    if old_observation.error_rate > 0.10:
+        if rollout_delta < 0:
+            reward += 0.7
+        elif rollout_delta > 0:
+            reward -= 0.5
+
+    # Error penalties and stability bonus.
+    if new_observation.error_rate > 0.20:
+        reward -= 1.2
+    elif new_observation.error_rate > 0.10:
+        reward -= 0.8
+    elif new_observation.error_rate > 0.05:
+        reward -= 0.3
+    elif new_observation.error_rate < 0.03 and (new_rollout >= 20.0 or rollout_delta > 0):
+        reward += 0.2
+
+    # Small pacing term to avoid unnecessary long trajectories.
+    reward -= 0.01
+
+    # Discourage unnecessary rollback in calm states.
     if action.action_type == "ROLLBACK":
         if old_observation.error_rate <= 0.10:
-            reward -= 0.8
+            reward -= 0.6
         else:
-            reward -= 0.2
+            reward -= 0.1
 
-    return float(reward)
+    return _clip_reward(reward)
 
 
 def calculate_reward_task3(
@@ -320,4 +395,4 @@ def calculate_reward_task3(
         else:
             reward -= 0.2
 
-    return float(reward)
+    return _clip_reward(reward)

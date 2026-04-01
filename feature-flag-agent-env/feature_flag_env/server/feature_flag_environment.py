@@ -194,6 +194,7 @@ class FeatureFlagEnvironment:
                 "difficulty": self._state.difficulty,
                 "step_count": self._state.step_count,
                 "total_reward": self._state.total_reward,
+                "done_reason": self._get_done_reason(observation, action) if done else "",
             },
         )
 
@@ -228,6 +229,15 @@ class FeatureFlagEnvironment:
             return True
 
         return False
+
+    def _get_done_reason(self, observation, action) -> str:
+        if self._state.step_count >= self._state.max_steps:
+            return "max_steps_reached"
+        if observation.error_rate > 0.25:
+            return "catastrophic_error_rate"
+        if action.target_percentage >= 100.0:
+            return "full_rollout_requested"
+        return "task_or_env_condition"
 
 
 

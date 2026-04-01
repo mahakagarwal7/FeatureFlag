@@ -1,7 +1,6 @@
 from agents.baseline_agent import BaselineAgent
 from agents.llm_agent import LLMAgent
 from agents.hybrid_agent import HybridAgent
-from agents.rl_agent import RLAgent
 
 
 def get_agent(name: str):
@@ -12,6 +11,7 @@ def get_agent(name: str):
     elif name == "hybrid":
         return HybridAgent()
     elif name == "rl":
+        from agents.rl_agent import RLAgent
         return RLAgent()
     else:
         raise ValueError(f"Unknown agent: {name}")

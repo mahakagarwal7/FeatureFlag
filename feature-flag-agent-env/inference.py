@@ -280,7 +280,7 @@ class EnvironmentClient:
 # =============================================================================
 # MAIN RUNNER
 # =============================================================================
-def run_episode(agent, env_client, task: str = "task1") -> Dict[str, Any]:
+def run_episode(agent, env_client, task: str = "task1", debug: bool = False) -> Dict[str, Any]:
     """
     Run one episode and return results.
     
@@ -307,6 +307,10 @@ def run_episode(agent, env_client, task: str = "task1") -> Dict[str, Any]:
     
     step_count = 0
     while not obs.done and step_count < 50:
+        if debug:
+            state_done = env_client.env.state().done if (not env_client.use_server and env_client.env is not None) else None
+            print(f"   [DEBUG] Loop start: step_count={step_count}, obs.done={obs.done}, state.done={state_done}")
+
         # Agent decides action
         action = agent.decide(obs, history)
         
@@ -325,6 +329,8 @@ def run_episode(agent, env_client, task: str = "task1") -> Dict[str, Any]:
         # Print step summary
         print(f"   ⏩ Step {step_count + 1}: {action.action_type} → {action.target_percentage}%")
         print(f"      Reward: {reward:+.2f} | Errors: {obs.error_rate*100:.2f}% | Health: {obs.system_health_score:.2f}")
+        if debug:
+            print(f"      [DEBUG] done={done}, info.done_reason={info.get('done_reason', '')}")
         
         step_count += 1
         
@@ -378,7 +384,7 @@ def main():
     parser.add_argument(
         "--task",
         type=str,
-        default="task1",
+        default="task3",
         choices=["task1", "task2", "task3"],
         help="Task to evaluate on"
     )
@@ -388,10 +394,26 @@ def main():
         help="Use HTTP server instead of direct environment"
     )
     parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Print step-level done diagnostics"
+    )
+    parser.add_argument(
         "--server-url",
         type=str,
         default="http://localhost:8000",
         help="Server URL if using HTTP"
+    )
+    parser.add_argument(
+        "--rl-model",
+        type=str,
+        default=None,
+        help="Path to RL model checkpoint for inference (optional)"
+    )
+    parser.add_argument(
+        "--rl-train-mode",
+        action="store_true",
+        help="Run RL agent in training/exploration mode during inference"
     )
     
     args = parser.parse_args()
@@ -407,7 +429,19 @@ def main():
     
     if args.agent == "rl":
         from agents.rl_agent import RLAgent
-        agent = RLAgent(task=args.task)
+        if args.rl_train_mode:
+            agent = RLAgent(task=args.task, model_path=args.rl_model, training=True)
+            print("⚠️ RL running in training mode (exploration enabled)")
+        else:
+            agent = RLAgent(
+                task=args.task,
+                model_path=args.rl_model,
+                training=False,
+                epsilon=0.0,
+                epsilon_min=0.0,
+            )
+            agent.epsilon = 0.0
+            print("✅ RL running in evaluation mode (deterministic policy)")
     else:
         from agents.factory import get_agent
         agent = get_agent(args.agent)
@@ -428,7 +462,7 @@ def main():
         print(f"📍 Episode {i + 1}/{args.episodes}")
         print("=" * 60)
         
-        result = run_episode(agent, env_client, task=args.task)
+        result = run_episode(agent, env_client, task=args.task, debug=args.debug)
         scores.append(result["score"])
 
         if hasattr(agent, "decay_epsilon"):
