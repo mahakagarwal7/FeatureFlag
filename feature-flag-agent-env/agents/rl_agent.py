@@ -332,7 +332,7 @@ class RLAgent:
         self.optimizer.zero_grad()
         loss.backward()
         
-        # Gradient clipping to prevent exploding gradients
+        
         grad_norm = clip_grad_norm_(self.policy_net.parameters(), self.max_grad_norm)
         
         self.optimizer.step()
