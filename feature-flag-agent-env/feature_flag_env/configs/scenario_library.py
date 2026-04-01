@@ -132,8 +132,13 @@ def get_scenarios_by_difficulty(difficulty: str) -> List[Dict[str, Any]]:
     ]
 
 
-def get_random_scenario() -> Dict[str, Any]:
+def get_random_scenario(difficulty: str = None) -> Dict[str, Any]:
     """Get a random scenario from the library"""
     import random
+    if difficulty:
+        scenarios = get_scenarios_by_difficulty(difficulty)
+        if not scenarios:
+            raise ValueError(f"No scenarios found for difficulty: {difficulty}")
+        return random.choice(scenarios).copy()
     scenario_name = random.choice(list(SCENARIO_LIBRARY.keys()))
     return SCENARIO_LIBRARY[scenario_name].copy()
