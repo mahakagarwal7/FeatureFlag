@@ -179,6 +179,11 @@ class FeatureFlagEnvironment:
 
        
         done = self._check_done(observation, action)
+
+        # Task1 terminal shaping: penalize ending below minimum acceptable rollout.
+        if done and self._state.difficulty == "easy" and observation.current_rollout_percentage < 23.0:
+            reward -= 0.5
+
         self._state.done = done
         observation.done = done
         observation.reward = reward

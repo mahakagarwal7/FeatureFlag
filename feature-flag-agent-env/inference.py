@@ -20,6 +20,7 @@ import os
 import sys
 import json
 from typing import List, Dict, Any
+import statistics
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -479,6 +480,10 @@ def main():
     print(f"   Average Score: {sum(scores) / len(scores):.3f}")
     print(f"   Min Score: {min(scores):.3f}")
     print(f"   Max Score: {max(scores):.3f}")
+    score_std = statistics.pstdev(scores) if len(scores) > 1 else 0.0
+    print(f"   Score Std Dev: {score_std:.4f}")
+    if max(scores) == min(scores) and args.agent == "rl" and not args.rl_train_mode:
+        print("   Note: Min=Max is expected for deterministic RL when policy is stable.")
     print("=" * 60)
     
     return {

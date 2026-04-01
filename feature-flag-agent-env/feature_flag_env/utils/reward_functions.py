@@ -97,6 +97,13 @@ def calculate_reward(
     elif rollout_delta < 0:
         # Small penalty for decreasing rollout (sometimes necessary, but not ideal)
         reward -= 0.2 * (abs(rollout_delta) / 100.0)
+
+    # Task1-style target precision shaping (requested):
+    # strong bonus in 23-27 target band, penalty for overshoot above 27.
+    if 23.0 <= new_observation.current_rollout_percentage <= 27.0:
+        reward += 1.5
+    if new_observation.current_rollout_percentage > 27.0:
+        reward -= 0.50
     
     # =========================================================================
     # 2. ERROR RATE PENALTY (Most critical - prevents outages!)
@@ -253,20 +260,51 @@ def calculate_reward_task1(
     - No rollbacks
     """
     reward = 0.0
-    
-    # Progress toward 25% goal
+
+    # Task 1 objective is to stop around 25%, not maximize rollout.
     target = 25.0
-    progress = min(new_observation.current_rollout_percentage / target, 1.0)
-    reward += 2.0 * progress
-    
+    rollout = float(new_observation.current_rollout_percentage)
+    old_rollout = float(old_observation.current_rollout_percentage)
+
+    # Mirrored precision shaping (same intent as calculate_reward).
+    if 23.0 <= rollout <= 27.0:
+        reward += 1.5
+    elif rollout > 27.0:
+        reward -= 0.50
+
+    # Fix 2: reduce INCREASE reward after 20%.
+    # Up to 20%: +0.60 per 10-point increase.
+    progress_low = max(0.0, min(rollout, 20.0) - min(old_rollout, 20.0))
+    if progress_low > 0.0:
+        reward += 0.6 * (progress_low / 10.0)
+
+    # 20%->25%: only up to +0.05 total (keeps maintain near target attractive).
+    progress_high = max(0.0, min(rollout, target) - max(old_rollout, 20.0))
+    if progress_high > 0.0:
+        reward += 0.05 * (progress_high / 5.0)
+
+    # Penalize larger overshoot beyond 30% strongly.
+    if rollout > 30.0:
+        reward -= 1.5 + (rollout - 30.0) / 20.0
+
+    # Target-proximity shaping: prefer being near 25% over stopping at 20%.
+    proximity = max(0.0, 1.0 - abs(rollout - target) / target)
+    reward += 0.2 * proximity
+
+    # Small penalty for stopping short of target band.
+    if rollout < 23.0:
+        reward -= 0.15
+
+    # Prevent MAINTAIN reward farming below target; reward maintain at target.
+    if action.action_type in {"MAINTAIN", "HALT_ROLLOUT"}:
+        if rollout < 23.0:
+            reward -= 0.20
+        elif 23.0 <= rollout <= 27.0:
+            reward += 0.20
+
     # Error penalty (stricter for this task)
     if new_observation.error_rate > 0.05:
         reward -= 2.0
-    
-    # Overshoot penalty: discourage going past the 25% target
-    if new_observation.current_rollout_percentage > target:
-        overshoot = new_observation.current_rollout_percentage - target
-        reward -= 3.0 * (overshoot / target)
 
     # Rollback penalty
     if action.action_type == "ROLLBACK":
@@ -274,9 +312,9 @@ def calculate_reward_task1(
         if old_observation.error_rate <= 0.05:
             reward -= 0.6
 
-    # Full rollout should be discouraged for Task 1
+    # Full rollout should be heavily discouraged for Task 1.
     if action.action_type == "FULL_ROLLOUT":
-        reward -= 2.0
+        reward -= 2.5
 
     return _clip_reward(reward)
 

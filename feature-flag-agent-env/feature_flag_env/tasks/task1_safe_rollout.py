@@ -60,8 +60,20 @@ class Task1SafeRolloutEnvironment(FeatureFlagEnvironment):
         return observation
 
     def _check_done(self, observation, action) -> bool:
-        if self.task_config and observation.current_rollout_percentage >= self.task_config["target_rollout"]:
+        rollout = float(observation.current_rollout_percentage)
+
+        # End if rollout is in the target band.
+        if 23.0 <= rollout <= 27.0:
             return True
+
+        # End if rollout overshoots significantly.
+        if rollout > 30.0:
+            return True
+
+        # End if max steps reached for this task.
+        if self._state and self._state.step_count >= self._state.max_steps:
+            return True
+
         return super()._check_done(observation, action)
 
 

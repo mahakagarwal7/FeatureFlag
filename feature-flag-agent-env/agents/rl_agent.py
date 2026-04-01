@@ -52,6 +52,7 @@ class RLAgent:
         task: str = "task1",
         model_path: Optional[str] = None,
         training: bool = True,
+        auto_load_model: bool = True,
         gamma: float = 0.99,
         lr: float = 1e-3,
         epsilon: float = 1.0,
@@ -123,6 +124,14 @@ class RLAgent:
             os.getenv("FF_TASK2_INFERENCE_SAFETY", "1").strip().lower()
             in {"1", "true", "yes", "on"}
         )
+        self.task1_action_mask_enabled = (
+            os.getenv("FF_TASK1_ACTION_MASK", "1").strip().lower()
+            in {"1", "true", "yes", "on"}
+        )
+        self.task1_inference_safety_enabled = (
+            os.getenv("FF_TASK1_INFERENCE_SAFETY", "1").strip().lower()
+            in {"1", "true", "yes", "on"}
+        )
         self.action_mask_events = 0
         self.action_safety_overrides = 0
 
@@ -145,7 +154,7 @@ class RLAgent:
             os.path.join(os.path.dirname(__file__), "..", "models", "dqn_model.pth")
         )
         self.model_path = model_path or default_model
-        if os.path.exists(self.model_path):
+        if auto_load_model and os.path.exists(self.model_path):
             self.load_model(self.model_path)
 
     def _safe_ratio(self, value: float, upper: float) -> float:
@@ -239,6 +248,41 @@ class RLAgent:
             allowed = list(range(self.action_dim))
         return allowed
 
+    def _task1_allowed_actions(self, observation: FeatureFlagObservation) -> List[int]:
+        allowed = list(range(self.action_dim))
+        if not self.task1_action_mask_enabled or self.task != "task1":
+            return allowed
+
+        rollout = float(observation.current_rollout_percentage)
+
+        # Below 20%: strongly encourage progress toward target region.
+        if rollout < 20.0:
+            for blocked_idx in (1, 2, 3, 4, 5):
+                if blocked_idx in allowed:
+                    allowed.remove(blocked_idx)
+
+        # Between 20 and 25: allow increase to enter the target band.
+        elif 20.0 <= rollout < 25.0:
+            for blocked_idx in (1, 4, 5):
+                if blocked_idx in allowed:
+                    allowed.remove(blocked_idx)
+
+        # In target band: prefer hold/maintain behavior.
+        elif 25.0 <= rollout <= 27.0:
+            for blocked_idx in (0, 4, 5):
+                if blocked_idx in allowed:
+                    allowed.remove(blocked_idx)
+
+        # Above safe target: avoid further increase.
+        elif rollout > 27.0:
+            for blocked_idx in (0, 4):
+                if blocked_idx in allowed:
+                    allowed.remove(blocked_idx)
+
+        if not allowed:
+            allowed = list(range(self.action_dim))
+        return allowed
+
     def _task2_inference_override(
         self, action_idx: int, observation: FeatureFlagObservation
     ) -> int:
@@ -265,13 +309,46 @@ class RLAgent:
 
         return action_idx
 
+    def _task1_inference_override(
+        self, action_idx: int, observation: FeatureFlagObservation
+    ) -> int:
+        if self.training or self.task != "task1" or not self.task1_inference_safety_enabled:
+            return action_idx
+
+        rollout = float(observation.current_rollout_percentage)
+
+        # Push toward target region while far below it.
+        if rollout < 20.0 and action_idx != 0:
+            self.action_safety_overrides += 1
+            return 0
+
+        # Between 20 and 25, force increase to enter target band.
+        if 20.0 <= rollout < 25.0 and action_idx != 0:
+            self.action_safety_overrides += 1
+            return 0
+
+        # Hold near target instead of scaling further.
+        if 25.0 <= rollout <= 27.0 and action_idx in {0, 4}:
+            self.action_safety_overrides += 1
+            return 2
+
+        # Above safe band: do not allow more increase/full rollout.
+        if rollout > 27.0 and action_idx in {0, 4}:
+            self.action_safety_overrides += 1
+            return 1
+
+        return action_idx
+
     def _select_action(self, state: np.ndarray, observation: Optional[FeatureFlagObservation] = None) -> int:
         if self.state_safety_enabled:
             state = self.validate_and_clip_state(state, source="policy_input")
 
         allowed_actions = list(range(self.action_dim))
         if observation is not None:
-            allowed_actions = self._task2_allowed_actions(observation)
+            if self.task == "task1":
+                allowed_actions = self._task1_allowed_actions(observation)
+            elif self.task == "task2":
+                allowed_actions = self._task2_allowed_actions(observation)
             if len(allowed_actions) < self.action_dim:
                 self.action_mask_events += 1
 
@@ -293,9 +370,15 @@ class RLAgent:
         action_type = self.ACTIONS[action_idx]
 
         if action_type == "INCREASE_ROLLOUT":
-            target = min(100.0, current + 10.0)
+            if self.task == "task1" and 20.0 <= current < 25.0:
+                target = min(25.0, current + 5.0)
+            else:
+                target = min(100.0, current + 10.0)
         elif action_type == "DECREASE_ROLLOUT":
-            target = max(0.0, current - 10.0)
+            if self.task == "task1" and 20.0 < current <= 25.0:
+                target = max(20.0, current - 5.0)
+            else:
+                target = max(0.0, current - 10.0)
         elif action_type == "MAINTAIN":
             target = current
         elif action_type == "HALT_ROLLOUT":
@@ -434,6 +517,7 @@ class RLAgent:
         state = self.encode_state(observation)
         action_idx = self._select_action(state, observation)
         action_idx = self._task2_inference_override(action_idx, observation)
+        action_idx = self._task1_inference_override(action_idx, observation)
 
         self.last_state = state
         self.last_action = action_idx
@@ -510,8 +594,10 @@ class RLAgent:
                 "avg_stored": float(self.reward_clipped_sum / total),
             },
             "action_masking": {
+                "task1_enabled": self.task1_action_mask_enabled,
                 "task2_enabled": self.task2_action_mask_enabled,
                 "mask_events": self.action_mask_events,
+                "task1_inference_safety": self.task1_inference_safety_enabled,
                 "task2_inference_safety": self.task2_inference_safety_enabled,
                 "safety_overrides": self.action_safety_overrides,
             },

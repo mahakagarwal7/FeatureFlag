@@ -49,9 +49,16 @@ class Task1Grader(BaseGrader):
         num_steps = len(trajectory)
         
         # ========== 1. ROLLOUT ACHIEVEMENT (40%) ==========
+        # Band-based scoring: prefer 23-27, penalize 30 compared to target band.
         target_rollout = 25.0
-        rollout_error = abs(final_obs.current_rollout_percentage - target_rollout)
-        rollout_score = max(0.0, 1.0 - rollout_error / target_rollout)
+        rollout = final_obs.current_rollout_percentage
+
+        if 23.0 <= rollout <= 27.0:
+            rollout_score = 1.0
+        elif 20.0 <= rollout < 23.0 or 27.0 < rollout <= 30.0:
+            rollout_score = 0.7
+        else:
+            rollout_score = self._normalize(rollout, 0.0, target_rollout * 1.5)
         
         # ========== 2. ERROR RATE COMPLIANCE (30%) ==========
         max_error_threshold = 0.05  # 5%

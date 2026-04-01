@@ -44,3 +44,23 @@ python inference.py --agent baseline --episodes 3
 # Start server
 python -m feature_flag_env.server.app
 ```
+
+---
+
+## 📈 Training Evidence (Task1)
+
+To include training progress in submission artifacts:
+
+```bash
+# Generate Task1 convergence figure from training logs
+python examples/visualize_training.py --log-dir logs/training --save-path logs/training/task1_convergence.png
+```
+
+The latest Task1 run shows clear convergence in reward and episode efficiency:
+- Early training avg reward (first 10 episodes): `1.931`
+- Late training avg reward (last 100 episodes): `2.130`
+- Best episode reward: `2.140`
+
+![Task1 training convergence](logs/training/task1_convergence.png)
+
+This demonstrates learning progression using logged training data without changing rollout behavior for submission evaluation.

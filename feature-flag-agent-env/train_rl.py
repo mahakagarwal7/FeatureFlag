@@ -143,6 +143,35 @@ def print_episode_summary(
     print(f"   Steps: {steps:2d} | Epsilon: {epsilon:.4f}")
     print(f"   Buffer: {buffer_stats['size']:5d}/{buffer_stats['capacity']:5d} | "
           f"Avg Reward: {buffer_stats['avg_reward']:+.3f}")
+
+
+def print_variance_health(
+    values: List[float],
+    label: str,
+    near_zero_threshold: float = 1e-6,
+    deterministic_eval: bool = False,
+):
+    """Print variance diagnostics and context-aware messaging for near-zero spread."""
+    if not values:
+        print(f"   {label} Variance: N/A (no samples)")
+        return
+
+    std_val = float(np.std(values))
+    min_val = float(np.min(values))
+    max_val = float(np.max(values))
+    print(f"   {label} Variance: std={std_val:.4f} | range=[{min_val:+.3f}, {max_val:+.3f}]")
+
+    if abs(max_val - min_val) <= near_zero_threshold:
+        if deterministic_eval:
+            print(
+                f"   ✅ {label} spread is near-zero; this is expected for a stable "
+                "deterministic evaluation policy."
+            )
+        else:
+            print(
+                f"   ⚠️ {label} spread is near-zero. "
+                "If this is active training, check exploration and environment randomness."
+            )
     
 
 def train(
@@ -164,6 +193,7 @@ def train(
     validation_episodes: int,
     early_stop_patience: int,
     best_model_path: Optional[str],
+    resume: bool,
     verbose: bool = False,
 ):
     """
@@ -201,10 +231,19 @@ def train(
     
     # Create environment and agent
     env = _make_env(task)
+    should_load_checkpoint = bool(resume and os.path.exists(save_model))
+    if resume and not os.path.exists(save_model):
+        print(f"  ⚠️ Resume requested but checkpoint not found: {save_model}")
+        print("  Starting fresh training run.")
+    if not resume and os.path.exists(save_model):
+        print(f"  ℹ️ Existing model found at {save_model}")
+        print("  Starting fresh training (checkpoint auto-load disabled). Use --resume to continue.")
+
     agent = RLAgent(
         task=task,
         training=True,
         model_path=save_model,
+        auto_load_model=should_load_checkpoint,
         gamma=gamma,
         lr=learning_rate,
         epsilon_decay=epsilon_decay,
@@ -318,6 +357,7 @@ def train(
             print(f"      Train Avg Reward ({eval_every} eps): {avg_reward_recent:+.3f}")
             print(f"      Val Avg Reward ({validation_episodes} eps): {val_avg_reward:+.3f}")
             print(f"      Val Avg Steps: {val_avg_steps:.1f}")
+            print_variance_health(val_rewards, "Validation Reward", deterministic_eval=True)
 
             if val_avg_reward > best_eval_score:
                 best_eval_score = val_avg_reward
@@ -375,6 +415,7 @@ def train(
     print(f"   Avg Steps/Episode: {final_stats['avg_steps_per_episode']:.1f}")
     print(f"   Buffer Final Size: {final_stats['buffer_final_size']}/{buffer_size}")
     print(f"   Best Eval Reward: {best_eval_score:+.3f}")
+    print_variance_health(episode_rewards, "Training Reward")
     clip_stats = final_stats["training_stats"].get("reward_clipping", {})
     state_stats = final_stats["training_stats"].get("state_validation", {})
     if clip_stats.get("samples", 0) > 0:
@@ -479,6 +520,7 @@ def evaluate(
     print(f"   Avg Reward: {final_stats['avg_reward']:+.3f} ± {final_stats['std_reward']:.3f}")
     print(f"   Reward Range: [{final_stats['min_reward']:+.3f}, {final_stats['max_reward']:+.3f}]")
     print(f"   Avg Steps: {final_stats['avg_steps']:.1f}")
+    print_variance_health(eval_rewards, "Evaluation Reward")
     print("=" * 70)
     
     return final_stats
@@ -625,6 +667,16 @@ def main():
         action="store_true",
         help="Apply recommended task2 training defaults (non-breaking preset)",
     )
+    parser.add_argument(
+        "--task1-tuned",
+        action="store_true",
+        help="Apply recommended task1 exploration defaults (non-breaking preset)",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume training from --model checkpoint if it exists",
+    )
     
     # Misc
     parser.add_argument(
@@ -644,6 +696,16 @@ def main():
             args.buffer_size = 20000
         if not args.scenario_mix:
             args.scenario_mix = True
+
+    if args.task1_tuned and args.task == "task1":
+        if args.episodes < 1000:
+            args.episodes = 1200
+        if args.epsilon_decay == 0.995:
+            args.epsilon_decay = 0.9995
+        if args.epsilon_min == 0.01:
+            args.epsilon_min = 0.15
+        if args.buffer_size == 10000:
+            args.buffer_size = 20000
 
     model_path = args.save_model or args.model
     mix_scenarios = [s.strip() for s in args.mix_scenarios.split(",") if s.strip()]
@@ -676,6 +738,7 @@ def main():
                 validation_episodes=args.validation_episodes,
                 early_stop_patience=args.early_stop_patience,
                 best_model_path=args.best_model,
+                resume=args.resume,
                 verbose=args.verbose,
             )
         else:  # evaluate
