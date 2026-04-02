@@ -2,32 +2,34 @@
 
 ## Summary of recent changes
 
-- Updated `feature-flag-agent-env/agents/llm_agent.py` to:
-  - parse and store `reason` from the LLM response into `FeatureFlagAction.reason`
-  - add safer target resolution via `_resolve_target_percentage(...)`
-  - keep rollout targets clamped between `0.0` and `100.0`
-- Updated `feature-flag-agent-env/examples/run_llm_agent.py` to lower the default episode count to `10`.
-- Added new unit tests in `feature-flag-agent-env/tests/test_llm_agent.py` covering:
-  - JSON block parsing from LLM output
-  - Python-style dict parsing from LLM output
-  - normalization of alias action names
-  - fallback to baseline behavior when `GROQ_API_KEY` is missing
-  - real Groq API integration when `GROQ_API_KEY` is set
-  - API error recovery and baseline fallback
-  - hybrid agent safety override logic
-  - default target resolution behavior for all action types
+- Updated `feature-flag-agent-env/agents/llm_agent.py`:
+  - improved `.env` discovery so `GROQ_API_KEY` can load from the working directory and parent repo paths
+  - preserved Groq client initialization when the API key is present
+  - ensured `LLMAgent.decide()` increments `api_calls` for real Groq requests
+- Updated `feature-flag-agent-env/agents/hybrid_agent.py`:
+  - added stronger unsafe action detection for `FULL_ROLLOUT` and `INCREASE_ROLLOUT`
+  - automatically falls back to baseline actions when LLM output is unsafe
+  - preserves the original LLM reason in the safety override message
+- Updated `feature-flag-agent-env/tests/test_llm_agent.py`:
+  - added a real Groq integration assertion: `agent.api_calls >= 1`
+  - added hybrid agent pass-through safety tests
+  - added hybrid backend integration validation with `EnvironmentClient`
+- Added scenario-based environment tests in `feature-flag-agent-env/tests/test_simulation.py`:
+  - `test_agents_on_high_error_scenario`
+  - `test_agents_on_latency_degradation_scenario`
+  - `test_agents_on_good_scenario_scaling_fast`
 
 ## Current repository state
 
 - Modified files:
-  - `COMPLETE_SETUP_AND_REFERENCE_GUIDE.md`
-  - `feature-flag-agent-env/agents/llm_agent.py`
-  - `feature-flag-agent-env/examples/run_llm_agent.py`
-- New files created but not yet tracked by git:
   - `changes.md`
+  - `feature-flag-agent-env/agents/llm_agent.py`
+  - `feature-flag-agent-env/agents/hybrid_agent.py`
   - `feature-flag-agent-env/tests/test_llm_agent.py`
+  - `feature-flag-agent-env/tests/test_simulation.py`
 
 ## Notes
 
-- Running `cd feature-flag-agent-env && python -m pytest tests/test_llm_agent.py -q` passed with `15 passed`.
-- A broader `pytest tests -q` run still hits environment-dependent server tests and is not fully validated in this session.
+- `cd feature-flag-agent-env && python -m pytest tests/test_llm_agent.py -q` → `17 passed`
+- `cd feature-flag-agent-env && python -m pytest tests/test_simulation.py -q` → `10 passed`
+- Groq API usage now reports actual calls in `agent.api_calls` when `GROQ_API_KEY` is configured.
