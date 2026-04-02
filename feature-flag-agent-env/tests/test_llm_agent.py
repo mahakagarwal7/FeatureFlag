@@ -160,6 +160,40 @@ def test_decide_with_real_groq_api():
     assert 0.0 <= action.target_percentage <= 100.0
     assert action.reason
     assert action.reason != "LLM decision"
+    assert agent.api_calls >= 1
+
+
+def test_decide_with_real_groq_api_multiple_calls():
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        pytest.skip("GROQ_API_KEY not set in environment")
+
+    try:
+        import groq  # noqa: F401
+    except ImportError:
+        pytest.skip("groq package is not installed")
+
+    agent = LLMAgent()
+    if agent.use_baseline:
+        pytest.skip("LLMAgent is using baseline fallback despite GROQ_API_KEY")
+
+    for idx in range(5):
+        obs = make_observation(
+            current_rollout_percentage=40.0 + idx * 5.0,
+            error_rate=0.02 + idx * 0.005,
+        )
+        action = agent.decide(obs, history=[])
+        assert action.action_type in {
+            "INCREASE_ROLLOUT",
+            "DECREASE_ROLLOUT",
+            "MAINTAIN",
+            "HALT_ROLLOUT",
+            "FULL_ROLLOUT",
+            "ROLLBACK",
+        }
+        assert 0.0 <= action.target_percentage <= 100.0
+
+    assert agent.api_calls == 5
 
 
 def test_decide_recovery_on_api_error(monkeypatch):
@@ -206,3 +240,62 @@ def test_hybrid_agent_safety_override(monkeypatch):
     assert action.action_type != "INCREASE_ROLLOUT"
     assert action.reason.startswith("Safety override")
     assert hybrid.safety_overrides == 1
+
+
+def test_hybrid_agent_passes_safe_llm_action(monkeypatch):
+    hybrid = HybridAgent()
+
+    monkeypatch.setattr(
+        hybrid.llm,
+        "decide",
+        lambda observation, history: FeatureFlagAction(
+            action_type="INCREASE_ROLLOUT",
+            target_percentage=50.0,
+            reason="Safe rollout increase"
+        ),
+    )
+
+    obs = make_observation(error_rate=0.03, current_rollout_percentage=40.0)
+    action = hybrid.decide(obs, history=[])
+
+    assert action.action_type == "INCREASE_ROLLOUT"
+    assert action.target_percentage == 50.0
+    assert action.reason == "Safe rollout increase"
+    assert hybrid.safety_overrides == 0
+
+
+def test_hybrid_agent_integration_with_environment(monkeypatch):
+    from inference import EnvironmentClient
+
+    hybrid = HybridAgent()
+
+    monkeypatch.setattr(
+        hybrid.llm,
+        "decide",
+        lambda observation, history: FeatureFlagAction(
+            action_type="FULL_ROLLOUT",
+            target_percentage=100.0,
+            reason="Force full rollout"
+        ),
+    )
+
+    env_client = EnvironmentClient(task="task3")
+    obs = env_client.reset()
+    action = hybrid.decide(obs, history=[])
+
+    assert action.action_type in {
+        "INCREASE_ROLLOUT",
+        "DECREASE_ROLLOUT",
+        "MAINTAIN",
+        "HALT_ROLLOUT",
+        "FULL_ROLLOUT",
+        "ROLLBACK",
+    }
+    assert 0.0 <= action.target_percentage <= 100.0
+    assert action.reason
+
+    next_obs, reward, done, info = env_client.step(action)
+    assert isinstance(next_obs, FeatureFlagObservation)
+    assert isinstance(reward, float)
+    assert isinstance(done, bool)
+    assert isinstance(info, dict)

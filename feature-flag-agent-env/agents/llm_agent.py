@@ -12,12 +12,17 @@ from feature_flag_env.models import FeatureFlagAction, FeatureFlagObservation
 
 
 if load_dotenv is not None:
-    # Load from current working directory first.
+    # Load environment variables from common .env locations.
     load_dotenv()
-    # Also load repository-level .env when invoked from nested folders.
-    project_env = Path(__file__).resolve().parents[1] / ".env"
-    if project_env.exists():
-        load_dotenv(dotenv_path=project_env)
+    env_candidates = [
+        Path.cwd() / ".env",
+        Path(__file__).resolve().parents[1] / ".env",
+        Path(__file__).resolve().parents[2] / ".env",
+        Path(__file__).resolve().parents[3] / ".env",
+    ]
+    for env_path in env_candidates:
+        if env_path.exists():
+            load_dotenv(dotenv_path=env_path)
 
 
 class LLMAgent:

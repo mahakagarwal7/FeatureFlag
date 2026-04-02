@@ -9,7 +9,38 @@ import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+import random
+import pytest
+
 from feature_flag_env.server.simulation_engine import FeatureFlagSimulator
+from feature_flag_env.server.feature_flag_environment import FeatureFlagEnvironment
+from feature_flag_env.models import FeatureFlagAction
+from agents.baseline_agent import BaselineAgent
+from agents.hybrid_agent import HybridAgent
+from agents.llm_agent import LLMAgent
+
+
+def _run_agent_episode(agent, scenario_config, max_steps=None):
+    env = FeatureFlagEnvironment(scenario_config=scenario_config)
+    observation = env.reset()
+    history = []
+
+    while not observation.done and env.state().step_count < (max_steps or env.state().max_steps):
+        action = agent.decide(observation, history)
+        response = env.step(action)
+        history.append({"action": action, "observation": response.observation, "reward": response.reward})
+        observation = response.observation
+
+    return {
+        "steps": env.state().step_count,
+        "total_reward": env.state().total_reward,
+        "final_rollout": observation.current_rollout_percentage,
+        "final_error_rate": observation.error_rate,
+        "final_latency": observation.latency_p99_ms,
+        "history": history,
+        "rollbacks": sum(1 for step in history if step["action"].action_type == "ROLLBACK"),
+        "done_reason": response.info.get("done_reason", ""),
+    }
 
 
 def test_basic_simulation():
@@ -53,7 +84,6 @@ def test_basic_simulation():
     assert 0.0 <= metrics['system_health_score'] <= 1.0, "Health out of range"
     
     print("   ✅ All metrics in valid ranges")
-    return True
 
 
 def test_error_scaling():
@@ -81,7 +111,6 @@ def test_error_scaling():
     # (allowing for some noise)
     assert error_rates[-1] > error_rates[0], "Errors should increase with rollout"
     print("   ✅ Errors scale with rollout percentage")
-    return True
 
 
 def test_incident_zones():
@@ -110,7 +139,6 @@ def test_incident_zones():
     assert metrics_45['error_rate'] > metrics_35['error_rate'], \
         "Error should spike in incident zone"
     print("   ✅ Incident zones trigger error spikes")
-    return True
 
 
 def test_adoption_growth():
@@ -136,7 +164,6 @@ def test_adoption_growth():
     # Adoption should increase over time (gradual growth)
     assert adoption_rates[-1] > adoption_rates[0], "Adoption should grow over time"
     print("   ✅ Adoption grows gradually")
-    return True
 
 
 def test_revenue_calculation():
@@ -162,7 +189,6 @@ def test_revenue_calculation():
     print(f"   Revenue at high adoption: ${metrics['revenue_impact']:.2f}")
     assert metrics['revenue_impact'] > 0, "Revenue should be positive"
     print("   ✅ Revenue calculated correctly")
-    return True
 
 
 def test_health_score():
@@ -202,7 +228,156 @@ def test_health_score():
     assert good_metrics['system_health_score'] > bad_metrics['system_health_score'], \
         "Good scenario should have higher health"
     print("   ✅ Health score reflects system state")
-    return True
+
+
+def test_agents_on_high_error_scenario(monkeypatch):
+    """Baseline and hybrid agents should stay safe when the environment spikes errors."""
+    monkeypatch.setattr(random, "randint", lambda a, b: 123)
+    scenario_config = {
+        "name": "high_error_feature",
+        "base_error_rate": 0.15,
+        "error_variance": 0.02,
+        "latency_per_10pct_rollout": 12.0,
+        "adoption_speed": 0.08,
+        "revenue_per_user": 0.10,
+        "total_users": 10000,
+        "incident_zones": [
+            {"min": 20, "max": 55, "probability": 1.0, "spike": 0.20}
+        ],
+    }
+
+    env_base = FeatureFlagEnvironment(scenario_config=scenario_config)
+    env_hybrid = FeatureFlagEnvironment(scenario_config=scenario_config)
+    env_base.reset()
+    env_hybrid.reset()
+
+    warmup_action = FeatureFlagAction(
+        action_type="INCREASE_ROLLOUT",
+        target_percentage=80.0,
+        reason="Warm-up to high-error state"
+    )
+    base_warmup = env_base.step(warmup_action)
+    hybrid_warmup = env_hybrid.step(warmup_action)
+
+    baseline_agent = BaselineAgent()
+    hybrid_agent = HybridAgent()
+
+    monkeypatch.setattr(
+        hybrid_agent.llm,
+        "decide",
+        lambda observation, history: FeatureFlagAction(
+            action_type="FULL_ROLLOUT",
+            target_percentage=100.0,
+            reason="Unsafe LLM push"
+        ),
+    )
+
+    baseline_action = baseline_agent.decide(base_warmup.observation, history=[])
+    hybrid_action = hybrid_agent.decide(hybrid_warmup.observation, history=[])
+
+    assert baseline_action.action_type in {"ROLLBACK", "DECREASE_ROLLOUT", "MAINTAIN"}
+    assert hybrid_action.action_type != "FULL_ROLLOUT"
+    assert hybrid_agent.safety_overrides == 1
+    assert hybrid_action.reason.startswith("Safety override")
+    assert hybrid_action.action_type == baseline_action.action_type
+
+    base_response = env_base.step(baseline_action)
+    hybrid_response = env_hybrid.step(hybrid_action)
+
+    assert base_response.observation.error_rate <= 0.25
+    assert hybrid_response.observation.error_rate <= 0.25
+    print("   ✅ High-error scenario: both baseline and hybrid avoid unsafe rollout")
+
+
+def test_agents_on_latency_degradation_scenario(monkeypatch):
+    """A high-latency scenario should degrade performance as rollout progresses."""
+    monkeypatch.setattr(random, "randint", lambda a, b: 123)
+    scenario_config = {
+        "name": "latency_degradation_feature",
+        "base_error_rate": 0.02,
+        "error_variance": 0.002,
+        "latency_per_10pct_rollout": 30.0,
+        "adoption_speed": 0.05,
+        "revenue_per_user": 0.10,
+        "total_users": 10000,
+        "incident_zones": [],
+    }
+
+    baseline_agent = BaselineAgent()
+    metrics = _run_agent_episode(baseline_agent, scenario_config, max_steps=5)
+
+    assert metrics["final_rollout"] >= 40.0
+    assert metrics["final_latency"] > 200.0
+    assert metrics["final_error_rate"] < 0.10
+    print("   ✅ Latency degradation scenario: baseline rollout drives latency above acceptable threshold")
+
+
+def test_agents_on_good_scenario_scaling_fast(monkeypatch):
+    """A stable scenario should allow fast rollout for both baseline and hybrid agents."""
+    monkeypatch.setattr(random, "randint", lambda a, b: 123)
+    scenario_config = {
+        "name": "good_feature",
+        "base_error_rate": 0.005,
+        "error_variance": 0.001,
+        "latency_per_10pct_rollout": 2.0,
+        "adoption_speed": 0.30,
+        "revenue_per_user": 0.10,
+        "total_users": 10000,
+        "incident_zones": [],
+    }
+
+    baseline_agent = BaselineAgent()
+    hybrid_agent = HybridAgent()
+    monkeypatch.setattr(
+        hybrid_agent.llm,
+        "decide",
+        lambda observation, history: baseline_agent.decide(observation, history),
+    )
+
+    baseline_metrics = _run_agent_episode(baseline_agent, scenario_config)
+    hybrid_metrics = _run_agent_episode(hybrid_agent, scenario_config)
+
+    assert baseline_metrics["final_rollout"] == 100.0
+    assert baseline_metrics["steps"] <= 10
+    assert baseline_metrics["final_error_rate"] < 0.10
+    assert hybrid_metrics["final_rollout"] == 100.0
+    assert hybrid_metrics["steps"] <= baseline_metrics["steps"]
+    print("   ✅ Good scenario: baseline and hybrid complete rollout quickly")
+
+
+def test_simulation_with_real_groq_llm_if_available():
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        pytest.skip("GROQ_API_KEY not set in environment")
+
+    try:
+        import groq  # noqa: F401
+    except ImportError:
+        pytest.skip("groq package is not installed")
+
+    llm_agent = LLMAgent()
+    if llm_agent.use_baseline:
+        pytest.skip("LLMAgent is using baseline fallback despite GROQ_API_KEY")
+
+    scenario_config = {
+        "name": "real_groq_simulation",
+        "base_error_rate": 0.02,
+        "error_variance": 0.005,
+        "latency_per_10pct_rollout": 10.0,
+        "adoption_speed": 0.10,
+        "revenue_per_user": 0.10,
+        "total_users": 10000,
+        "incident_zones": [],
+    }
+
+    metrics = _run_agent_episode(llm_agent, scenario_config, max_steps=3)
+
+    assert llm_agent.api_calls >= 1
+    assert metrics["steps"] >= 1
+    assert 0.0 <= metrics["final_rollout"] <= 100.0
+    assert metrics["final_error_rate"] >= 0.0
+
+    print("   ✅ Real Groq LLM simulation exercised actual API calls")
 
 
 def test_reproducibility():
@@ -229,7 +404,6 @@ def test_reproducibility():
     print(f"   Run 1 error rate: {metrics1['error_rate']:.6f}")
     print(f"   Run 2 error rate: {metrics2['error_rate']:.6f}")
     print("   ✅ Results are reproducible with same seed")
-    return True
 
 
 def main():
