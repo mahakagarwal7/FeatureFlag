@@ -1,6 +1,7 @@
 import os
 import json
 import ast
+import time
 from pathlib import Path
 
 try:
@@ -30,6 +31,8 @@ class LLMAgent:
         self.model = model
         self.api_key = os.getenv("GROQ_API_KEY")
         self.timeout_seconds = float(os.getenv("GROQ_TIMEOUT_SECONDS", "20"))
+        self.max_retries = int(os.getenv("GROQ_MAX_RETRIES", "2"))
+        self.retry_backoff_seconds = float(os.getenv("GROQ_RETRY_BACKOFF_SECONDS", "1.5"))
         self.debug = os.getenv("FF_DEBUG_API", "0") == "1"
         self.api_calls = 0
         self.api_failures = 0
@@ -144,6 +147,20 @@ class LLMAgent:
         from agents.baseline_agent import BaselineAgent
         return BaselineAgent().decide(observation, history)
 
+    def _should_retry(self, exc: Exception) -> bool:
+        """Retry on transient/rate-limit API errors."""
+        status_code = getattr(exc, "status_code", None)
+        if status_code in {408, 409, 429, 500, 502, 503, 504}:
+            return True
+        text = str(exc).lower()
+        return (
+            "429" in text
+            or "rate limit" in text
+            or "too many requests" in text
+            or "timeout" in text
+            or "temporar" in text
+        )
+
     def decide(self, observation: FeatureFlagObservation, history):
         if self.use_baseline:
             if self.debug:
@@ -169,6 +186,8 @@ Adoption: {observation.user_adoption_rate}
 Revenue: {observation.revenue_impact}
 Health: {observation.system_health_score}
 
+For task2, aim for a final rollout around 65-70% and avoid overshooting above 70% unless you have a strong reason.
+
 Allowed action_type values only:
 - INCREASE_ROLLOUT
 - DECREASE_ROLLOUT
@@ -185,15 +204,34 @@ Respond with JSON only (no markdown, no prose):
 }}
 """
 
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "You are a rollout controller. Return strict JSON only."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.7,
-                response_format={"type": "json_object"},
-            )
+            response = None
+            last_exc: Exception | None = None
+            for attempt in range(self.max_retries + 1):
+                try:
+                    response = self.client.chat.completions.create(
+                        model=self.model,
+                        messages=[
+                            {"role": "system", "content": "You are a rollout controller. Return strict JSON only."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        temperature=0.7,
+                        response_format={"type": "json_object"},
+                    )
+                    break
+                except Exception as exc:
+                    last_exc = exc
+                    if attempt >= self.max_retries or not self._should_retry(exc):
+                        raise
+                    sleep_for = self.retry_backoff_seconds * (2 ** attempt)
+                    if self.debug:
+                        print(
+                            f"[LLM DEBUG] transient API error, retrying in {sleep_for:.1f}s "
+                            f"(attempt {attempt + 1}/{self.max_retries})"
+                        )
+                    time.sleep(sleep_for)
+
+            if response is None and last_exc is not None:
+                raise last_exc
 
             content = response.choices[0].message.content
             data = self._parse_llm_json(content)
@@ -205,6 +243,16 @@ Respond with JSON only (no markdown, no prose):
             )
             reason = (data.get("reason") or "").strip() or "LLM decision"
 
+            # Anti-stall nudge: at rollout 0 with healthy metrics, avoid repeated hold/halt loops.
+            if (
+                observation.current_rollout_percentage <= 0.0
+                and observation.error_rate < 0.05
+                and normalized_action in {"MAINTAIN", "HALT_ROLLOUT", "ROLLBACK"}
+            ):
+                normalized_action = "INCREASE_ROLLOUT"
+                target_percentage = 10.0
+                reason = f"{reason} | startup nudge to avoid zero-rollout stall"
+
             return FeatureFlagAction(
                 action_type=normalized_action,
                 target_percentage=target_percentage,
@@ -214,6 +262,9 @@ Respond with JSON only (no markdown, no prose):
         except Exception as exc:
             self.api_failures += 1
             self.last_error = str(exc)
+            # Avoid hammering API after repeated hard failures.
+            if self._should_retry(exc):
+                self.use_baseline = True
             if self.debug:
                 print(f"[LLM DEBUG] API failure #{self.api_failures}: {exc}")
             return self._fallback(observation, history)
