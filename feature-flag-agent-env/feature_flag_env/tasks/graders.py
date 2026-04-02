@@ -93,10 +93,10 @@ class Task2Grader(BaseGrader):
     """
     Task 2: Risk-Aware Scaling (MEDIUM)
     
-    Goal: Scale to 75% while responding to incidents
+    Goal: Scale to ~70% while responding to incidents
     
     Scoring:
-    - 35%: Reach 75% final rollout
+    - 35%: Reach ~70% final rollout (best in the 65-70 band)
     - 30%: Respond to incidents correctly
     - 20%: Recover after incidents
     - 15%: Maintain latency < 200ms
@@ -118,12 +118,14 @@ class Task2Grader(BaseGrader):
         final_obs = trajectory[-1]["observation"]
         
         # ========== 1. FINAL ROLLOUT (35%) ==========
-        target_rollout = 75.0
-        rollout_score = self._normalize(
-            final_obs.current_rollout_percentage,
-            0.0,
-            target_rollout
-        )
+        target_rollout = 70.0
+        rollout = final_obs.current_rollout_percentage
+        if 65.0 <= rollout <= 70.0:
+            rollout_score = 1.0
+        elif rollout > 70.0:
+            rollout_score = max(0.0, 1.0 - ((rollout - 70.0) / 30.0))
+        else:
+            rollout_score = self._normalize(rollout, 0.0, target_rollout)
         
         # ========== 2. INCIDENT RESPONSE (30%) ==========
         # Check if agent decreased rollout when errors spiked
@@ -170,10 +172,11 @@ class Task3Grader(BaseGrader):
     Goal: Maximize revenue while balancing adoption, risk, and health
     
     Scoring:
-    - 30%: Cumulative revenue
-    - 25%: Final adoption rate
+    - 25%: Cumulative revenue
+    - 20%: Final adoption rate
     - 20%: Average system health
-    - 15%: Balance score
+    - 15%: Final rollout attainment (toward 100%)
+    - 10%: Balance score
     - 10%: No catastrophic failures
     """
     
@@ -192,12 +195,12 @@ class Task3Grader(BaseGrader):
         
         final_obs = trajectory[-1]["observation"]
         
-        # ========== 1. CUMULATIVE REVENUE (30%) ==========
+        # ========== 1. CUMULATIVE REVENUE (25%) ==========
         total_revenue = sum(step["observation"].revenue_impact for step in trajectory)
         # Normalize: assume $5000 is excellent for 50 steps
         revenue_score = self._normalize(total_revenue, 0.0, 5000.0)
         
-        # ========== 2. FINAL ADOPTION RATE (25%) ==========
+        # ========== 2. FINAL ADOPTION RATE (20%) ==========
         target_adoption = 0.80  # 80%
         adoption_score = self._normalize(
             final_obs.user_adoption_rate,
@@ -210,25 +213,29 @@ class Task3Grader(BaseGrader):
             step["observation"].system_health_score for step in trajectory
         ) / len(trajectory)
         health_score = avg_health  # Already 0.0-1.0
+
+        # ========== 4. FINAL ROLLOUT ATTAINMENT (15%) ==========
+        rollout_score = self._normalize(final_obs.current_rollout_percentage, 0.0, 100.0)
         
-        # ========== 4. BALANCE SCORE (15%) ==========
+        # ========== 5. BALANCE SCORE (10%) ==========
         # How well did agent balance competing objectives?
         balance_score = min(
-            (adoption_score + health_score + (1.0 - final_obs.error_rate)) / 3.0,
+            (adoption_score + health_score + rollout_score + (1.0 - final_obs.error_rate)) / 4.0,
             1.0
         )
         
-        # ========== 5. NO CATASTROPHIC FAILURES (10%) ==========
+        # ========== 6. NO CATASTROPHIC FAILURES (10%) ==========
         max_error = max(step["observation"].error_rate for step in trajectory)
         catastrophe_penalty = 0.5 if max_error > 0.20 else 0.0
         failure_score = 1.0 - catastrophe_penalty
         
         # ========== FINAL SCORE ==========
         final_score = (
-            0.30 * revenue_score +
-            0.25 * adoption_score +
+            0.25 * revenue_score +
+            0.20 * adoption_score +
             0.20 * health_score +
-            0.15 * balance_score +
+            0.15 * rollout_score +
+            0.10 * balance_score +
             0.10 * failure_score
         )
         

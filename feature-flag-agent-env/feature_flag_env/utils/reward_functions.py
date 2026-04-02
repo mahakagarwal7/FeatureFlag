@@ -328,12 +328,12 @@ def calculate_reward_task2(
     Reward function for Task 2: Risk-Aware Scaling (Handle Incidents)
 
     Emphasizes:
-    - Reaching 75% rollout
+    - Reaching ~70% rollout (preferred 65-70 band)
     - Responding to incidents (decrease when errors spike)
     - Recovery after incidents
     """
     reward = 0.0
-    target = 75.0
+    target = 70.0
 
     old_rollout = old_observation.current_rollout_percentage
     new_rollout = new_observation.current_rollout_percentage
@@ -352,9 +352,9 @@ def calculate_reward_task2(
         reward -= 0.2
 
     # Bonus band around target and explicit overshoot penalty.
-    if 70.0 <= new_rollout <= 80.0:
+    if 65.0 <= new_rollout <= 70.0:
         reward += 0.6
-    if new_rollout > 90.0:
+    if new_rollout > 75.0:
         reward -= 1.0
 
     # Encourage gradual scaling (10-20% per step); discourage large jumps.
@@ -405,12 +405,35 @@ def calculate_reward_task3(
     Reward function for Task 3: Multi-Objective Optimization
     
     Emphasizes:
+    - Progressing rollout toward 100%
     - Maximizing cumulative revenue
     - Maintaining system health > 0.7
     - Achieving > 80% adoption
     - Zero catastrophic failures
     """
     reward = 0.0
+
+    old_rollout = float(old_observation.current_rollout_percentage)
+    new_rollout = float(new_observation.current_rollout_percentage)
+    rollout_delta = new_rollout - old_rollout
+
+    # Explicitly reward movement toward 100% rollout for task3.
+    old_distance = abs(100.0 - old_rollout)
+    new_distance = abs(100.0 - new_rollout)
+    if new_distance < old_distance:
+        reward += 0.35
+    elif new_distance > old_distance:
+        reward -= 0.20
+
+    # Prefer ending in high-rollout operating region when safe.
+    if new_rollout >= 90.0:
+        reward += 0.20
+    elif new_rollout < 70.0:
+        reward -= 0.20
+
+    # Late-episode shaping: avoid getting stuck too low near episode end.
+    if new_observation.time_step >= 35 and new_rollout < 85.0:
+        reward -= 0.40 * ((85.0 - new_rollout) / 85.0)
     
     # Revenue focus
     reward += 0.5 * (new_observation.revenue_impact / 1000.0)
@@ -421,6 +444,12 @@ def calculate_reward_task3(
     # Health maintenance
     if new_observation.system_health_score < 0.7:
         reward -= 0.5
+
+    # Discourage stalling/de-escalating while system is healthy enough.
+    if action.action_type in {"MAINTAIN", "HALT_ROLLOUT"} and new_rollout < 90.0 and new_observation.error_rate < 0.08:
+        reward -= 0.15
+    if action.action_type == "DECREASE_ROLLOUT" and new_rollout < 90.0 and old_observation.error_rate < 0.08:
+        reward -= 0.20
     
     # Catastrophic failure (very heavy penalty)
     if new_observation.error_rate > 0.20:
