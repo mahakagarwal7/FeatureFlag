@@ -3,10 +3,10 @@ feature_flag_env/tasks/task2_risk_aware.py
 
 Task 2: Risk-Aware Scaling (MEDIUM)
 
-Goal: Scale to 75% rollout while responding to simulated incidents.
+Goal: Scale to ~70% rollout while responding to simulated incidents.
 
 Success Criteria:
-- Reach 75% final rollout
+- Reach ~70% final rollout
 - Detect and respond to incidents (decrease when errors spike)
 - Recover after incidents
 - Maintain latency < 200ms
@@ -34,11 +34,11 @@ class Task2RiskAwareEnvironment(FeatureFlagEnvironment):
         self.task_config = {
             "task_name": "task2_risk_aware",
             "difficulty": "medium",
-            "target_rollout": 75.0,
+            "target_rollout": 70.0,
             "max_error_rate": 0.10,
             "max_steps": 30,
             "incident_zone": {"min": 40, "max": 50},
-            "description": "Scale to 75% rollout while responding to simulated incidents",
+            "description": "Scale to ~70% rollout while responding to simulated incidents",
         }
     
     def reset(self):
