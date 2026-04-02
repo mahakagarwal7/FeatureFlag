@@ -89,6 +89,7 @@ class LLMAgent:
             "CONTINUE": "INCREASE_ROLLOUT",
             "CONTINUE_ROLLOUT": "INCREASE_ROLLOUT",
             "SCALE_UP": "INCREASE_ROLLOUT",
+            "SCALE_DOWN": "DECREASE_ROLLOUT",
             "SCALE_BACK": "DECREASE_ROLLOUT",
             "DECREASE": "DECREASE_ROLLOUT",
             "PAUSE": "HALT_ROLLOUT",
@@ -114,6 +115,25 @@ class LLMAgent:
             return action
 
         return "MAINTAIN"
+
+    def _resolve_target_percentage(self, raw_target, action_type: str, current_rollout: float) -> float:
+        try:
+            target = float(raw_target)
+        except (TypeError, ValueError):
+            target = current_rollout
+
+        if action_type in {"MAINTAIN", "HALT_ROLLOUT"}:
+            target = current_rollout
+        elif action_type == "FULL_ROLLOUT":
+            target = 100.0
+        elif action_type == "ROLLBACK":
+            target = 0.0
+        elif action_type == "INCREASE_ROLLOUT" and target <= current_rollout:
+            target = min(100.0, current_rollout + 10.0)
+        elif action_type == "DECREASE_ROLLOUT" and target >= current_rollout:
+            target = max(0.0, current_rollout - 10.0)
+
+        return max(0.0, min(100.0, target))
 
     def _fallback(self, observation, history):
         from agents.baseline_agent import BaselineAgent
@@ -155,7 +175,8 @@ Allowed action_type values only:
 Respond with JSON only (no markdown, no prose):
 {{
  "action_type": "...",
- "target_percentage": number
+ "target_percentage": number,
+ "reason": "..."
 }}
 """
 
@@ -172,19 +193,17 @@ Respond with JSON only (no markdown, no prose):
             content = response.choices[0].message.content
             data = self._parse_llm_json(content)
             normalized_action = self._normalize_action_type(data.get("action_type"))
-            target_percentage = float(data.get("target_percentage", observation.current_rollout_percentage))
-
-            if normalized_action in {"MAINTAIN", "HALT_ROLLOUT"}:
-                target_percentage = observation.current_rollout_percentage
-            elif normalized_action == "FULL_ROLLOUT":
-                target_percentage = 100.0
-            elif normalized_action == "ROLLBACK":
-                target_percentage = 0.0
+            target_percentage = self._resolve_target_percentage(
+                data.get("target_percentage"),
+                normalized_action,
+                observation.current_rollout_percentage,
+            )
+            reason = (data.get("reason") or "").strip() or "LLM decision"
 
             return FeatureFlagAction(
                 action_type=normalized_action,
-                target_percentage=max(0.0, min(100.0, target_percentage)),
-                reason="LLM decision"
+                target_percentage=target_percentage,
+                reason=reason,
             )
 
         except Exception as exc:

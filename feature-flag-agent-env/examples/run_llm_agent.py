@@ -12,7 +12,7 @@ from inference import EnvironmentClient, run_episode
 
 def main():
 	parser = argparse.ArgumentParser(description="Run LLM agent episodes")
-	parser.add_argument("--episodes", type=int, default=3)
+	parser.add_argument("--episodes", type=int, default=10)
 	parser.add_argument("--task", type=str, default="task1", choices=["task1", "task2", "task3"])
 	parser.add_argument("--debug", action="store_true")
 	args = parser.parse_args()
