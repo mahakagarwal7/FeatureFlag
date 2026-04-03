@@ -3,7 +3,7 @@ from agents.llm_agent import LLMAgent
 from agents.hybrid_agent import HybridAgent
 
 
-def get_agent(name: str):
+def get_agent(name: str, **kwargs):
     if name == "baseline":
         return BaselineAgent()
     elif name == "llm":
@@ -12,6 +12,12 @@ def get_agent(name: str):
         return HybridAgent()
     elif name == "rl":
         from agents.rl_agent import RLAgent
-        return RLAgent()
+        return RLAgent(**kwargs)
+    elif name in {"hitl", "human_in_loop"}:
+        from agents.human_in_loop_agent import HumanInLoopAgent
+        return HumanInLoopAgent(**kwargs)
+    elif name == "ensemble":
+        from agents.ensemble_agent import EnsembleAgent
+        return EnsembleAgent(**kwargs)
     else:
         raise ValueError(f"Unknown agent: {name}")

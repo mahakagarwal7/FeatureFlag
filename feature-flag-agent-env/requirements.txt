@@ -12,6 +12,13 @@ pydantic-settings>=2.0.0
 fastapi>=0.100.0
 uvicorn>=0.23.0
 
+# Security (API Authentication & Security)
+PyJWT>=2.8.0
+python-jose[cryptography]>=3.0.0
+
+# Monitoring & Observability
+prometheus-client>=0.19.0
+
 # Math & Simulation
 numpy>=1.24.0
 torch>=2.0.0

@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 import httpx
 import uvicorn
+import pytest
 from feature_flag_env.server.app import app
 
 
@@ -32,7 +33,21 @@ def start_test_server():
     server_thread.start()
     
     # Wait for server to start
-    time.sleep(2)
+    for _ in range(20):
+        try:
+            with httpx.Client() as client:
+                response = client.get("http://127.0.0.1:8001/health", timeout=1.0)
+                if response.status_code == 200:
+                    return
+        except Exception:
+            time.sleep(0.5)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def server_fixture():
+    """Ensure the test server is running for the whole module."""
+    start_test_server()
+    yield
 
 
 def stop_test_server():
