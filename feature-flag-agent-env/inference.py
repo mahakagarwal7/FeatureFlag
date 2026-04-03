@@ -11,6 +11,7 @@ Usage:
     python inference.py --agent llm --episodes 5
     python inference.py --agent hybrid --episodes 5
     python inference.py --agent rl --episodes 5
+    python inference.py --agent hitl --episodes 5 --task task2 --rl-model models/dqn_task2.pth
 
 Hackathon Requirement: Must run without errors and produce reproducible scores.
 """
@@ -19,6 +20,7 @@ import argparse
 import os
 import sys
 import json
+import re
 from typing import List, Dict, Any
 import statistics
 
@@ -27,6 +29,81 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from feature_flag_env.models import FeatureFlagAction, FeatureFlagObservation
 from feature_flag_env.tasks.graders import get_grader
+
+
+def _hitl_decision_label(reason: str) -> str:
+    text = (reason or "").lower()
+    if "human-approved" in text:
+        return "HUMAN_APPROVED"
+    if "human selected baseline policy" in text:
+        return "HUMAN_BASELINE"
+    if "human rejected" in text:
+        return "HUMAN_REJECTED"
+    if "custom rollout target" in text:
+        return "HUMAN_CUSTOM"
+    if "requested episode skip" in text:
+        return "HUMAN_SKIP"
+    if "non-interactive mode; using baseline" in text:
+        return "NONINT_BASELINE"
+    if "auto-approved (non-interactive mode)" in text:
+        return "NONINT_APPROVED"
+    if "auto-approved" in text:
+        return "AUTO_APPROVED"
+    return "UNSPECIFIED"
+
+
+def _extract_confidence(reason: str) -> str:
+    if not reason:
+        return "-"
+    match = re.search(r"confidence\s*=\s*([0-9]*\.?[0-9]+)", reason)
+    if not match:
+        return "-"
+    return f"{float(match.group(1)):.2f}"
+
+
+def _print_hitl_audit_table(rows: List[Dict[str, str]]) -> None:
+    if not rows:
+        return
+    print("\n🧾 HITL Decision Audit")
+    print("-" * 72)
+    print(f"{'Step':<6}{'Decision':<20}{'Action':<20}{'Target%':<10}{'Conf':<8}")
+    print("-" * 72)
+    for row in rows:
+        print(
+            f"{row['step']:<6}{row['decision']:<20}{row['action']:<20}"
+            f"{row['target']:<10}{row['confidence']:<8}"
+        )
+    print("-" * 72)
+
+
+def _parse_weight_string(weights_text: str) -> Dict[str, float] | None:
+    if not weights_text:
+        return None
+    parsed: Dict[str, float] = {}
+    for token in weights_text.split(","):
+        part = token.strip()
+        if not part:
+            continue
+        if "=" not in part:
+            raise ValueError(f"Invalid weight token: {part}")
+        name, value = part.split("=", 1)
+        key = name.strip().lower()
+        if key not in {"rl", "baseline", "llm"}:
+            raise ValueError(f"Unknown agent in weight token: {key}")
+        parsed[key] = float(value.strip())
+    return parsed or None
+
+
+def _print_ensemble_stats(agent) -> None:
+    if not hasattr(agent, "get_stats"):
+        return
+    stats = agent.get_stats()
+    print("\n📊 Ensemble Stats:")
+    print(f"   Total decisions: {stats['total_decisions']}")
+    print(f"   Agreement rate: {stats['agreement_rate']:.1f}%")
+    print(f"   RL wins: {stats['rl_wins']}")
+    print(f"   Baseline wins: {stats['baseline_wins']}")
+    print(f"   LLM wins: {stats['llm_wins']}")
 
 
 # =============================================================================
@@ -281,7 +358,13 @@ class EnvironmentClient:
 # =============================================================================
 # MAIN RUNNER
 # =============================================================================
-def run_episode(agent, env_client, task: str = "task1", debug: bool = False) -> Dict[str, Any]:
+def run_episode(
+    agent,
+    env_client,
+    task: str = "task1",
+    debug: bool = False,
+    enable_hitl_audit: bool = False,
+) -> Dict[str, Any]:
     """
     Run one episode and return results.
     
@@ -300,6 +383,7 @@ def run_episode(agent, env_client, task: str = "task1", debug: bool = False) -> 
     trajectory = []
     total_reward = 0.0
     history = []
+    hitl_audit_rows: List[Dict[str, str]] = []
     
     print(f"\n🎬 Episode Started")
     print(f"   Feature: {obs.feature_name}")
@@ -326,6 +410,17 @@ def run_episode(agent, env_client, task: str = "task1", debug: bool = False) -> 
         })
         history.append({"obs": obs, "action": action, "reward": reward})
         total_reward += reward
+
+        if enable_hitl_audit:
+            hitl_audit_rows.append(
+                {
+                    "step": str(step_count + 1),
+                    "decision": _hitl_decision_label(action.reason),
+                    "action": action.action_type,
+                    "target": f"{action.target_percentage:.1f}",
+                    "confidence": _extract_confidence(action.reason),
+                }
+            )
         
         # Print step summary
         print(f"   ⏩ Step {step_count + 1}: {action.action_type} → {action.target_percentage}%")
@@ -355,6 +450,9 @@ def run_episode(agent, env_client, task: str = "task1", debug: bool = False) -> 
     print(f"   Final Rollout: {obs.current_rollout_percentage}%")
     print(f"   Final Errors: {obs.error_rate*100:.2f}%")
     print(f"   Task Score: {score:.3f}")
+
+    if enable_hitl_audit:
+        _print_hitl_audit_table(hitl_audit_rows)
     
     return {
         "steps": step_count,
@@ -373,7 +471,7 @@ def main():
         "--agent",
         type=str,
         default="baseline",
-        choices=["baseline", "llm", "hybrid", "rl"],
+        choices=["baseline", "llm", "hybrid", "rl", "hitl", "ensemble"],
         help="Agent type to use"
     )
     parser.add_argument(
@@ -416,6 +514,37 @@ def main():
         action="store_true",
         help="Run RL agent in training/exploration mode during inference"
     )
+    parser.add_argument(
+        "--hitl-threshold",
+        type=float,
+        default=0.75,
+        help="Confidence threshold for auto-approval in HITL mode (0.0-1.0)"
+    )
+    parser.add_argument(
+        "--hitl-noninteractive-action",
+        type=str,
+        default="baseline",
+        choices=["baseline", "approve"],
+        help="Fallback behavior when HITL runs without interactive stdin"
+    )
+    parser.add_argument(
+        "--hitl-no-prompt",
+        action="store_true",
+        help="Disable human prompts and force non-interactive HITL behavior"
+    )
+    parser.add_argument(
+        "--ensemble-strategy",
+        type=str,
+        default="weighted",
+        choices=["weighted", "rl_with_safety", "majority", "confidence"],
+        help="Voting strategy for ensemble mode"
+    )
+    parser.add_argument(
+        "--ensemble-weights",
+        type=str,
+        default="",
+        help="Optional weights format: rl=0.5,baseline=0.3,llm=0.2"
+    )
     
     args = parser.parse_args()
     
@@ -443,6 +572,35 @@ def main():
             )
             agent.epsilon = 0.0
             print("✅ RL running in evaluation mode (deterministic policy)")
+    elif args.agent == "hitl":
+        from agents.human_in_loop_agent import HumanInLoopAgent
+
+        agent = HumanInLoopAgent(
+            task=args.task,
+            model_path=args.rl_model,
+            confidence_threshold=args.hitl_threshold,
+            non_interactive_action=args.hitl_noninteractive_action,
+            allow_human_prompt=not args.hitl_no_prompt,
+        )
+        prompt_state = "enabled" if not args.hitl_no_prompt else "disabled"
+        print(
+            "✅ HITL mode enabled "
+            f"(threshold={args.hitl_threshold:.2f}, prompts={prompt_state})"
+        )
+    elif args.agent == "ensemble":
+        from agents.ensemble_agent import EnsembleAgent
+
+        ensemble_weights = _parse_weight_string(args.ensemble_weights)
+        agent = EnsembleAgent(
+            task=args.task,
+            model_path=args.rl_model,
+            strategy=args.ensemble_strategy,
+            weights=ensemble_weights,
+        )
+        weights_view = args.ensemble_weights if args.ensemble_weights else "default"
+        print("✅ Using Multi-Agent Ensemble")
+        print(f"   Voting strategy: {args.ensemble_strategy}")
+        print(f"   Agent weights: {weights_view}")
     else:
         from agents.factory import get_agent
         agent = get_agent(args.agent)
@@ -463,7 +621,16 @@ def main():
         print(f"📍 Episode {i + 1}/{args.episodes}")
         print("=" * 60)
         
-        result = run_episode(agent, env_client, task=args.task, debug=args.debug)
+        if args.agent == "hitl":
+            result = run_episode(
+                agent,
+                env_client,
+                task=args.task,
+                debug=args.debug,
+                enable_hitl_audit=True,
+            )
+        else:
+            result = run_episode(agent, env_client, task=args.task, debug=args.debug)
         scores.append(result["score"])
 
         if hasattr(agent, "decay_epsilon"):
@@ -484,6 +651,8 @@ def main():
     print(f"   Score Std Dev: {score_std:.4f}")
     if max(scores) == min(scores) and args.agent == "rl" and not args.rl_train_mode:
         print("   Note: Min=Max is expected for deterministic RL when policy is stable.")
+    if args.agent == "ensemble":
+        _print_ensemble_stats(agent)
     print("=" * 60)
     
     return {
