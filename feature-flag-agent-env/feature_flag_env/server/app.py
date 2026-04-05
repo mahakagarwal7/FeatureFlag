@@ -28,6 +28,13 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    logger.warning("python-dotenv not installed; .env file will not be loaded")
+
 # Import our environment and models
 try:
     from feature_flag_env.server.feature_flag_environment import FeatureFlagEnvironment
@@ -95,6 +102,17 @@ except ImportError as e:
     monitoring_config = None
 
 
+# Import database module (optional, non-breaking)
+try:
+    from feature_flag_env.utils.database import database
+    DATABASE_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Database module not available: {e}")
+    logger.info("Server will run without SQLite persistence")
+    DATABASE_AVAILABLE = False
+    database = None
+
+
 # =========================
 # FASTAPI APP INITIALIZATION
 # =========================
@@ -107,10 +125,10 @@ async def lifespan(app: FastAPI):
     # Startup: Initialize environment
     global environment
     environment = FeatureFlagEnvironment()
-    print("🌍 Environment initialized on server startup")
+    print("[*] Environment initialized on server startup")
     yield
     # Shutdown: Cleanup if needed
-    print("🛑 Server shutting down")
+    print("[!] Server shutting down")
     environment = None
 
 
@@ -132,12 +150,12 @@ environment: Optional[FeatureFlagEnvironment] = None
 # =========================
 if SECURITY_AVAILABLE and security_config.enabled:
     app.add_middleware(SecurityMiddleware)
-    logger.info("🔒 Security middleware ENABLED (authentication, rate limiting, audit logging)")
+    logger.info("[+] Security middleware ENABLED (authentication, rate limiting, audit logging)")
 else:
     if SECURITY_AVAILABLE:
-        logger.info("⚪ Security module available but DISABLED (set ENABLE_SECURITY=true to activate)")
+        logger.info("[-] Security module available but DISABLED (set ENABLE_SECURITY=true to activate)")
     else:
-        logger.info("⚪ Security module not installed (install: pip install PyJWT>=2.8.0 python-jose[cryptography]>=3.0.0)")
+        logger.info("[-] Security module not installed (install: pip install PyJWT>=2.8.0 python-jose[cryptography]>=3.0.0)")
 
 
 # =========================
@@ -168,7 +186,7 @@ if MONITORING_AVAILABLE and monitoring_config.enabled:
                 user="anonymous"
             )
             raise
-    logger.info("📊 Monitoring middleware ENABLED (metrics collection, health tracking, alerting)")
+    logger.info("[*] Monitoring middleware ENABLED (metrics collection, health tracking, alerting)")
 else:
     if MONITORING_AVAILABLE:
         logger.info("⚪ Monitoring module available but DISABLED (set ENABLE_MONITORING=true to activate)")
@@ -256,6 +274,18 @@ async def reset_environment():
     
     try:
         observation = environment.reset()
+        state = environment.state()
+
+        if DATABASE_AVAILABLE and database and database.is_enabled():
+            database.record_episode_reset(
+                episode_id=state.episode_id,
+                scenario_name=state.scenario_name,
+                difficulty=state.difficulty,
+                feature_name=observation.feature_name,
+                current_rollout_percentage=observation.current_rollout_percentage,
+                error_rate=observation.error_rate,
+                metadata={"source": "api_reset"},
+            )
         
         print(f"🔄 Episode reset - New episode started")
         print(f"   Feature: {observation.feature_name}")
@@ -264,9 +294,9 @@ async def reset_environment():
         return ResetResponse(
             observation=observation,
             info={
-                "episode_id": environment.state().episode_id,
-                "scenario_name": environment.state().scenario_name,
-                "difficulty": environment.state().difficulty,
+                "episode_id": state.episode_id,
+                "scenario_name": state.scenario_name,
+                "difficulty": state.difficulty,
             }
         )
     
@@ -303,11 +333,27 @@ async def step_environment(action_request: StepRequest):
         )
 
         response = environment.step(action)
+        state = environment.state()
 
         print(f"⏩ Step executed: {action.action_type} → {action.target_percentage}%")
         print(f"   Reward: {response.reward:+.2f}")
         print(f"   Errors: {response.observation.error_rate*100:.2f}%")
         print(f"   Done: {response.done}")
+
+        if DATABASE_AVAILABLE and database and database.is_enabled():
+            database.record_step(
+                episode_id=state.episode_id,
+                step_count=state.step_count,
+                action_type=action.action_type,
+                target_percentage=action.target_percentage,
+                reward=response.reward,
+                error_rate=response.observation.error_rate,
+                latency_p99_ms=response.observation.latency_p99_ms,
+                system_health_score=response.observation.system_health_score,
+                done=response.done,
+                reason=action.reason,
+                metadata={"source": "api_step"},
+            )
 
         if MONITORING_AVAILABLE and monitoring_config.enabled:
             from time import time
@@ -736,6 +782,24 @@ if MONITORING_AVAILABLE:
             "critical_count": len([a for a in alerts if a.severity == "critical"]),
             "warning_count": len([a for a in alerts if a.severity == "warning"])
         }
+
+
+# =========================
+# DATABASE ENDPOINTS (optional)
+# =========================
+if DATABASE_AVAILABLE:
+    @app.get("/db/health")
+    async def get_database_health():
+        """Get SQLite health/status (safe even when DB disabled)."""
+        return database.get_health()
+
+
+    @app.get("/db/stats")
+    async def get_database_stats():
+        """Get SQLite row counts for episode and audit events."""
+        return database.get_stats()
+
+
 if __name__ == "__main__":
     """
     Run the server directly with:
@@ -766,7 +830,7 @@ if __name__ == "__main__":
 
     if MONITORING_AVAILABLE:
         if monitoring_config.enabled:
-            print(f"   📊 Monitoring: ENABLED")
+            print(f"   [*] Monitoring: ENABLED")
             print(f"      - Metrics Collection: ON")
             print(f"      - Alerting: {'ON' if monitoring_config.enable_alerting else 'OFF'}")
             print(f"      - Prometheus Export: {'ON' if monitoring_config.enable_prometheus else 'OFF'}")
@@ -774,6 +838,17 @@ if __name__ == "__main__":
             print(f"      - Prometheus: http://localhost:{port}/metrics")
         else:
             print(f"   ⚪ Monitoring: Available but disabled (set ENABLE_MONITORING=true to enable)")
+
+    if DATABASE_AVAILABLE and database:
+        db_health = database.get_health()
+        if db_health.get("enabled"):
+            print(f"   🗄️ SQLite: ENABLED")
+            print(f"      - Path: {db_health.get('path')}")
+            print(f"      - Connected: {'YES' if db_health.get('connected') else 'NO'}")
+            print(f"      - DB Health: http://localhost:{port}/db/health")
+            print(f"      - DB Stats: http://localhost:{port}/db/stats")
+        else:
+            print(f"   ⚪ SQLite: Available but disabled (set ENABLE_DATABASE=true to enable)")
 
     uvicorn.run(
         "feature_flag_env.server.app:app",
