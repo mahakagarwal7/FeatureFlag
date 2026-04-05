@@ -31,6 +31,14 @@ except ImportError:
 
 from fastapi import HTTPException, Request
 from starlette.middleware.base import BaseHTTPMiddleware
+from fastapi.responses import JSONResponse
+
+try:
+    from feature_flag_env.utils.database import database
+    DATABASE_AVAILABLE = True
+except Exception:
+    database = None
+    DATABASE_AVAILABLE = False
 
 
 # =========================
@@ -48,7 +56,8 @@ class SecurityConfig:
     def __init__(self):
         # Feature flags
         self.enabled = os.getenv("ENABLE_SECURITY", "false").lower() == "true"
-        self.require_auth = os.getenv("REQUIRE_AUTH", "false").lower() == "true"
+        # Backward compatibility: auth cannot be required when security is disabled.
+        self.require_auth = self.enabled and os.getenv("REQUIRE_AUTH", "false").lower() == "true"
         self.enable_audit_logging = os.getenv("ENABLE_AUDIT_LOGGING", "true").lower() == "true"
         self.enable_rate_limiting = os.getenv("ENABLE_RATE_LIMITING", "true").lower() == "true"
         
@@ -138,6 +147,18 @@ class AuditLogger:
         
         # Optionally persist to file
         self._write_audit_file(log_entry)
+
+        # Optionally persist to SQLite (best-effort)
+        if DATABASE_AVAILABLE and database and database.is_enabled():
+            database.record_audit_event(
+                ts=timestamp,
+                user=user,
+                action=action,
+                endpoint=endpoint,
+                method=method,
+                status_code=status_code,
+                details=details or {},
+            )
         
         logger.info(f"[AUDIT] {user} → {action} ({method} {endpoint}) → {status_code}")
     
@@ -405,7 +426,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         try:
             user = await get_authenticated_user(request)
         except HTTPException as e:
-            return e
+            return JSONResponse(status_code=e.status_code, content={"detail": e.detail})
         
         # Check rate limit
         if config.enabled and config.enable_rate_limiting:
@@ -420,7 +441,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                     details={"error": error_msg}
                 )
                 
-                return HTTPException(status_code=429, detail=error_msg)
+                return JSONResponse(status_code=429, content={"detail": error_msg})
         
         # Process request
         response = await call_next(request)
