@@ -49,13 +49,14 @@ function Invoke-PyTest {
 function Wait-ForHealth {
     param(
         [string]$Url,
-        [int]$TimeoutSeconds = 30
+        [int]$TimeoutSeconds = 30,
+        [hashtable]$Headers = @{}
     )
 
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
         try {
-            $response = Invoke-RestMethod -Uri $Url -Method Get -TimeoutSec 2
+            $response = Invoke-RestMethod -Uri $Url -Method Get -TimeoutSec 2 -Headers $Headers
             if ($null -ne $response) {
                 return $true
             }
@@ -66,6 +67,34 @@ function Wait-ForHealth {
     }
 
     return $false
+}
+
+function Get-ValidationHeaders {
+    param(
+        [string]$EnvFilePath
+    )
+
+    if (-not (Test-Path -LiteralPath $EnvFilePath)) {
+        return @{}
+    }
+
+    $apiKeysLine = Get-Content -LiteralPath $EnvFilePath | Where-Object { $_ -match '^API_KEYS=' } | Select-Object -First 1
+    if ([string]::IsNullOrWhiteSpace($apiKeysLine)) {
+        return @{}
+    }
+
+    $raw = ($apiKeysLine -replace '^API_KEYS=', '').Trim()
+    if ([string]::IsNullOrWhiteSpace($raw)) {
+        return @{}
+    }
+
+    $firstPair = ($raw -split ',')[0]
+    $pairParts = $firstPair -split '=', 2
+    if ($pairParts.Count -lt 2 -or [string]::IsNullOrWhiteSpace($pairParts[1])) {
+        return @{}
+    }
+
+    return @{ 'X-API-Key' = $pairParts[1].Trim() }
 }
 
 Write-Host '=== Feature Flag Validation ==='
@@ -83,10 +112,11 @@ if ($null -ne $existingListener) {
 }
 
 $env:ENV_PORT = '8001'
+$validationHeaders = Get-ValidationHeaders -EnvFilePath (Join-Path $repoRoot '.env')
 $serverProcess = Start-Process -FilePath 'python' -ArgumentList @('-m', 'uvicorn', 'feature_flag_env.server.app:app', '--host', '127.0.0.1', '--port', '8001') -PassThru -WindowStyle Hidden
 
 try {
-    $serverReady = Wait-ForHealth -Url 'http://127.0.0.1:8001/health' -TimeoutSeconds 30
+    $serverReady = Wait-ForHealth -Url 'http://127.0.0.1:8001/health' -TimeoutSeconds 30 -Headers $validationHeaders
     if (-not $serverReady) {
         Add-Result -Name 'Server startup' -Passed $false -Details 'Health endpoint did not respond in time'
     }
@@ -94,7 +124,7 @@ try {
         Add-Result -Name 'Server startup' -Passed $true -Details 'Health endpoint responded'
 
         try {
-            $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8001/health' -Method Get -TimeoutSec 5
+            $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8001/health' -Method Get -TimeoutSec 5 -Headers $validationHeaders
             $ok = $health.status -eq 'healthy' -and $health.environment_ready -eq $true
             Add-Result -Name '/health endpoint' -Passed $ok -Details ($health | ConvertTo-Json -Compress)
         }
@@ -103,7 +133,7 @@ try {
         }
 
         try {
-            $reset = Invoke-RestMethod -Uri 'http://127.0.0.1:8001/reset' -Method Post -TimeoutSec 5
+            $reset = Invoke-RestMethod -Uri 'http://127.0.0.1:8001/reset' -Method Post -TimeoutSec 5 -Headers $validationHeaders
             $ok = $null -ne $reset.observation -and $null -ne $reset.info
             Add-Result -Name '/reset endpoint' -Passed $ok -Details 'Reset returned observation and info'
         }
@@ -113,7 +143,7 @@ try {
 
         try {
             $body = @{ action_type = 'INCREASE_ROLLOUT'; target_percentage = 10; reason = 'validation run' } | ConvertTo-Json
-            $step = Invoke-RestMethod -Uri 'http://127.0.0.1:8001/step' -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 5
+            $step = Invoke-RestMethod -Uri 'http://127.0.0.1:8001/step' -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 5 -Headers $validationHeaders
             $ok = $null -ne $step.observation -and $null -ne $step.reward
             Add-Result -Name '/step endpoint' -Passed $ok -Details ('reward=' + $step.reward)
         }
@@ -122,7 +152,7 @@ try {
         }
 
         try {
-            $state = Invoke-RestMethod -Uri 'http://127.0.0.1:8001/state' -Method Get -TimeoutSec 5
+            $state = Invoke-RestMethod -Uri 'http://127.0.0.1:8001/state' -Method Get -TimeoutSec 5 -Headers $validationHeaders
             $ok = $null -ne $state.episode_id -and $null -ne $state.step_count
             Add-Result -Name '/state endpoint' -Passed $ok -Details ('step_count=' + $state.step_count)
         }
@@ -131,7 +161,7 @@ try {
         }
 
         try {
-            $metrics = Invoke-RestMethod -Uri 'http://127.0.0.1:8001/metrics' -Method Get -TimeoutSec 5
+            $metrics = Invoke-RestMethod -Uri 'http://127.0.0.1:8001/metrics' -Method Get -TimeoutSec 5 -Headers $validationHeaders
             $ok = $metrics -match 'ff_health_score' -or $metrics -is [string]
             Add-Result -Name '/metrics endpoint' -Passed $ok -Details 'Prometheus text received'
         }
@@ -140,7 +170,7 @@ try {
         }
 
         try {
-            $monHealth = Invoke-RestMethod -Uri 'http://127.0.0.1:8001/monitoring/health' -Method Get -TimeoutSec 5
+            $monHealth = Invoke-RestMethod -Uri 'http://127.0.0.1:8001/monitoring/health' -Method Get -TimeoutSec 5 -Headers $validationHeaders
             $ok = $null -ne $monHealth.health_score -and $null -ne $monHealth.status
             Add-Result -Name '/monitoring/health endpoint' -Passed $ok -Details ('status=' + $monHealth.status)
         }
@@ -149,7 +179,7 @@ try {
         }
 
         try {
-            $dashboard = Invoke-RestMethod -Uri 'http://127.0.0.1:8001/monitoring/dashboard' -Method Get -TimeoutSec 5
+            $dashboard = Invoke-RestMethod -Uri 'http://127.0.0.1:8001/monitoring/dashboard' -Method Get -TimeoutSec 5 -Headers $validationHeaders
             $ok = $null -ne $dashboard.timestamp -and $null -ne $dashboard.health
             Add-Result -Name '/monitoring/dashboard endpoint' -Passed $ok -Details 'Dashboard data received'
         }
@@ -158,7 +188,7 @@ try {
         }
 
         try {
-            $alerts = Invoke-RestMethod -Uri 'http://127.0.0.1:8001/monitoring/alerts' -Method Get -TimeoutSec 5
+            $alerts = Invoke-RestMethod -Uri 'http://127.0.0.1:8001/monitoring/alerts' -Method Get -TimeoutSec 5 -Headers $validationHeaders
             $ok = $null -ne $alerts.count -and $null -ne $alerts.alerts
             Add-Result -Name '/monitoring/alerts endpoint' -Passed $ok -Details ('count=' + $alerts.count)
         }
