@@ -368,25 +368,30 @@ class RLAgent:
     def _action_to_env(self, action_idx: int, obs: FeatureFlagObservation) -> FeatureFlagAction:
         current = obs.current_rollout_percentage
         action_type = self.ACTIONS[action_idx]
+        task2_cap = 70.0 if self.task == "task2" else 100.0
 
         if action_type == "INCREASE_ROLLOUT":
             if self.task == "task1" and 20.0 <= current < 25.0:
                 target = min(25.0, current + 5.0)
             else:
-                target = min(100.0, current + 10.0)
+                target = min(task2_cap, current + 10.0)
         elif action_type == "DECREASE_ROLLOUT":
             if self.task == "task1" and 20.0 < current <= 25.0:
                 target = max(20.0, current - 5.0)
             else:
                 target = max(0.0, current - 10.0)
         elif action_type == "MAINTAIN":
-            target = current
+            target = min(current, task2_cap)
         elif action_type == "HALT_ROLLOUT":
-            target = current
+            target = min(current, task2_cap)
         elif action_type == "FULL_ROLLOUT":
-            target = 100.0
+            target = task2_cap
         else:
             target = 0.0
+
+        # Hard safety bound for task2: never request rollout above 70%.
+        if self.task == "task2":
+            target = min(target, 70.0)
 
         return FeatureFlagAction(
             action_type=action_type,
