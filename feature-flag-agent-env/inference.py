@@ -295,7 +295,7 @@ class EnvironmentClient:
     Can connect to local server or use environment directly.
     """
 
-    def __init__(self, use_server: bool = False, server_url: str = "http://localhost:8000", task: str = "task1"):
+    def __init__(self, use_server: bool = False, server_url: str = "https://friizy-featureflag.hf.space", task: str = "task1"):
         self.use_server = use_server
         self.server_url = server_url
         self.env = None
@@ -488,9 +488,9 @@ def main():
         help="Task to evaluate on"
     )
     parser.add_argument(
-        "--use-server",
+        "--local",
         action="store_true",
-        help="Use HTTP server instead of direct environment"
+        help="Run direct environment instead of cloud server"
     )
     parser.add_argument(
         "--debug",
@@ -500,7 +500,7 @@ def main():
     parser.add_argument(
         "--server-url",
         type=str,
-        default="http://localhost:8000",
+        default="https://friizy-featureflag.hf.space",
         help="Server URL if using HTTP"
     )
     parser.add_argument(
@@ -557,7 +557,7 @@ def main():
     print(f"   Agent: {args.agent}")
     print(f"   Episodes: {args.episodes}")
     print(f"   Task: {args.task}")
-    print(f"   Use Server: {args.use_server}")
+    print(f"   Use Server: {not args.local}")
     print("=" * 60)
     
     if args.agent == "rl":
@@ -612,7 +612,7 @@ def main():
     
     # Create environment client
     env_client = EnvironmentClient(
-        use_server=args.use_server,
+        use_server=not args.local,
         server_url=args.server_url,
         task=args.task
     )
