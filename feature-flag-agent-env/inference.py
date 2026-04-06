@@ -98,7 +98,7 @@ def _print_ensemble_stats(agent) -> None:
     if not hasattr(agent, "get_stats"):
         return
     stats = agent.get_stats()
-    print("\n📊 Ensemble Stats:")
+    print("\nEnsemble Stats:")
     print(f"   Total decisions: {stats['total_decisions']}")
     print(f"   Agreement rate: {stats['agreement_rate']:.1f}%")
     print(f"   RL wins: {stats['rl_wins']}")
@@ -169,7 +169,7 @@ class LLMAgent:
         self.api_key = os.getenv("GROQ_API_KEY")
         
         if not self.api_key:
-            print("⚠️  WARNING: GROQ_API_KEY not set. Using baseline agent instead.")
+            print("WARNING: GROQ_API_KEY is not set. Using the baseline agent instead.")
             self.use_baseline = True
         else:
             self.use_baseline = False
@@ -177,7 +177,7 @@ class LLMAgent:
                 from groq import Groq
                 self.client = Groq(api_key=self.api_key)
             except ImportError:
-                print("⚠️  WARNING: groq package not installed. Using baseline agent.")
+                print("WARNING: groq package is not installed. Using the baseline agent.")
                 self.use_baseline = True
     
     def _build_prompt(self, obs: FeatureFlagObservation, history: List) -> str:
@@ -385,7 +385,7 @@ def run_episode(
     history = []
     hitl_audit_rows: List[Dict[str, str]] = []
     
-    print(f"\n🎬 Episode Started")
+    print(f"\nEpisode Started")
     print(f"   Feature: {obs.feature_name}")
     print(f"   Initial Rollout: {obs.current_rollout_percentage}%")
     print(f"   Initial Errors: {obs.error_rate*100:.2f}%")
@@ -423,7 +423,7 @@ def run_episode(
             )
         
         # Print step summary
-        print(f"   ⏩ Step {step_count + 1}: {action.action_type} → {action.target_percentage}%")
+        print(f"   Step {step_count + 1}: {action.action_type} -> {action.target_percentage}%")
         print(f"      Reward: {reward:+.2f} | Errors: {obs.error_rate*100:.2f}% | Health: {obs.system_health_score:.2f}")
         if debug:
             print(f"      [DEBUG] done={done}, info.done_reason={info.get('done_reason', '')}")
@@ -444,7 +444,7 @@ def run_episode(
     grader = get_grader(task)
     score = grader.grade(trajectory)
     
-    print(f"\n📊 Episode Complete")
+    print(f"\nEpisode Complete")
     print(f"   Steps: {step_count}")
     print(f"   Total Reward: {total_reward:+.2f}")
     print(f"   Final Rollout: {obs.current_rollout_percentage}%")
@@ -547,9 +547,12 @@ def main():
     )
     
     args = parser.parse_args()
+
+    # Expose task context for simple rule-based policies that do not receive task explicitly.
+    os.environ["FF_ACTIVE_TASK"] = args.task
     
     print("=" * 60)
-    print("🚀 FEATURE FLAG AGENT - BASELINE INFERENCE")
+    print("FEATURE FLAG AGENT - INFERENCE")
     print("=" * 60)
     print(f"   Agent: {args.agent}")
     print(f"   Episodes: {args.episodes}")
@@ -561,7 +564,7 @@ def main():
         from agents.rl_agent import RLAgent
         if args.rl_train_mode:
             agent = RLAgent(task=args.task, model_path=args.rl_model, training=True)
-            print("⚠️ RL running in training mode (exploration enabled)")
+            print("WARNING: RL is running in training mode (exploration enabled)")
         else:
             agent = RLAgent(
                 task=args.task,
@@ -571,7 +574,7 @@ def main():
                 epsilon_min=0.0,
             )
             agent.epsilon = 0.0
-            print("✅ RL running in evaluation mode (deterministic policy)")
+            print("RL is running in evaluation mode (deterministic policy)")
     elif args.agent == "hitl":
         from agents.human_in_loop_agent import HumanInLoopAgent
 
@@ -584,7 +587,7 @@ def main():
         )
         prompt_state = "enabled" if not args.hitl_no_prompt else "disabled"
         print(
-            "✅ HITL mode enabled "
+            "HITL mode enabled "
             f"(threshold={args.hitl_threshold:.2f}, prompts={prompt_state})"
         )
     elif args.agent == "ensemble":
@@ -598,14 +601,14 @@ def main():
             weights=ensemble_weights,
         )
         weights_view = args.ensemble_weights if args.ensemble_weights else "default"
-        print("✅ Using Multi-Agent Ensemble")
+        print("Using multi-agent ensemble")
         print(f"   Voting strategy: {args.ensemble_strategy}")
         print(f"   Agent weights: {weights_view}")
     else:
         from agents.factory import get_agent
         agent = get_agent(args.agent)
 
-    print(f"✅ Using {args.agent.upper()} Agent")
+    print(f"Using {args.agent.upper()} agent")
     
     # Create environment client
     env_client = EnvironmentClient(
@@ -618,7 +621,7 @@ def main():
     scores = []
     for i in range(args.episodes):
         print(f"\n{'=' * 60}")
-        print(f"📍 Episode {i + 1}/{args.episodes}")
+        print(f"Episode {i + 1}/{args.episodes}")
         print("=" * 60)
         
         if args.agent == "hitl":
@@ -641,7 +644,7 @@ def main():
             
     # Summary
     print("\n" + "=" * 60)
-    print("📊 FINAL SUMMARY")
+    print("FINAL SUMMARY")
     print("=" * 60)
     print(f"   Episodes: {args.episodes}")
     print(f"   Average Score: {sum(scores) / len(scores):.3f}")

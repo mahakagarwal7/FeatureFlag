@@ -1,13 +1,13 @@
-"""
+﻿"""
 feature_flag_env/server/app.py
 
 FastAPI Server for OpenEnv-Compliant Feature Flag Environment
 
 This server exposes the environment via HTTP endpoints:
-- POST /reset    → Start a new episode
-- POST /step     → Execute an action
-- GET  /state    → Get current episode state
-- GET  /health   → Health check endpoint
+- POST /reset    ΓåÆ Start a new episode
+- POST /step     ΓåÆ Execute an action
+- GET  /state    ΓåÆ Get current episode state
+- GET  /health   ΓåÆ Health check endpoint
 
 This allows agents (LLM, baseline, etc.) to interact with the
 environment remotely, which is required for OpenEnv specification.
@@ -138,7 +138,7 @@ app = FastAPI(
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
-    lifespan=lifespan,  # ✅ Use lifespan instead of on_event
+    lifespan=lifespan,  # Γ£à Use lifespan instead of on_event
 )
 
 # Global environment instance (one per server)
@@ -189,16 +189,16 @@ if MONITORING_AVAILABLE and monitoring_config.enabled:
     logger.info("[*] Monitoring middleware ENABLED (metrics collection, health tracking, alerting)")
 else:
     if MONITORING_AVAILABLE:
-        logger.info("⚪ Monitoring module available but DISABLED (set ENABLE_MONITORING=true to activate)")
+        logger.info("ΓÜ¬ Monitoring module available but DISABLED (set ENABLE_MONITORING=true to activate)")
     else:
-        logger.info("⚪ Monitoring module not installed (install: pip install prometheus-client>=0.19.0)")
+        logger.info("ΓÜ¬ Monitoring module not installed (install: pip install prometheus-client>=0.19.0)")
 
 
 class StepRequest(BaseModel):
     """
     Request model for /step endpoint.
     
-    ✅ FIXED: Use Literal type to restrict valid action types at model level.
+    Γ£à FIXED: Use Literal type to restrict valid action types at model level.
     This provides automatic validation - invalid action_type returns HTTP 422.
     """
     action_type: Literal[
@@ -287,9 +287,9 @@ async def reset_environment():
                 metadata={"source": "api_reset"},
             )
         
-        print(f"🔄 Episode reset - New episode started")
-        print(f"   Feature: {observation.feature_name}")
-        print(f"   Initial rollout: {observation.current_rollout_percentage}%")
+        logger.info("Episode reset - New episode started")
+        logger.info("Feature: %s", observation.feature_name)
+        logger.info("Initial rollout: %s%%", observation.current_rollout_percentage)
         
         return ResetResponse(
             observation=observation,
@@ -301,6 +301,7 @@ async def reset_environment():
         )
     
     except Exception as e:
+        logger.exception("Unexpected error in /reset: %s", e)
         raise HTTPException(
             status_code=500,
             detail=f"Reset failed: {str(e)}"
@@ -314,7 +315,7 @@ async def step_environment(action_request: StepRequest):
     
     This is the MAIN endpoint called every time the agent takes an action.
     
-    ✅ FIXED: StepRequest now uses Literal type for action_type,
+    Γ£à FIXED: StepRequest now uses Literal type for action_type,
     so Pydantic automatically validates and returns HTTP 422 for invalid actions.
     """
     global environment
@@ -335,10 +336,10 @@ async def step_environment(action_request: StepRequest):
         response = environment.step(action)
         state = environment.state()
 
-        print(f"⏩ Step executed: {action.action_type} → {action.target_percentage}%")
-        print(f"   Reward: {response.reward:+.2f}")
-        print(f"   Errors: {response.observation.error_rate*100:.2f}%")
-        print(f"   Done: {response.done}")
+        logger.info("Step executed: %s -> %s%%", action.action_type, action.target_percentage)
+        logger.info("Reward: %+.2f", response.reward)
+        logger.info("Errors: %.2f%%", response.observation.error_rate * 100)
+        logger.info("Done: %s", response.done)
 
         if DATABASE_AVAILABLE and database and database.is_enabled():
             database.record_step(
@@ -379,9 +380,7 @@ async def step_environment(action_request: StepRequest):
         )
 
     except Exception as e:
-        import traceback
-        print(f"❌ Unexpected error in /step: {e}")
-        print(traceback.format_exc())
+        logger.exception("Unexpected error in /step: %s", e)
         if MONITORING_AVAILABLE and monitoring_config.enabled:
             monitoring_record_step(
                 step_duration_ms=0,
@@ -812,7 +811,7 @@ if __name__ == "__main__":
     port = int(os.getenv("ENV_PORT", "8000"))
     reload = os.getenv("ENV_RELOAD", "false").lower() == "true"
 
-    print(f"🚀 Starting Feature Flag Environment Server")
+    print(f"≡ƒÜÇ Starting Feature Flag Environment Server")
     print(f"   Host: {host}")
     print(f"   Port: {port}")
     print(f"   Docs: http://localhost:{port}/docs")
@@ -821,12 +820,12 @@ if __name__ == "__main__":
     if SECURITY_AVAILABLE:
         status = get_security_status()
         if security_config.enabled:
-            print(f"   🔒 Security: ENABLED")
+            print(f"   ≡ƒöÆ Security: ENABLED")
             print(f"      - Authentication: {'ON' if security_config.require_auth else 'OFF'}")
             print(f"      - Rate Limiting: {status['rate_limit_requests']} req/{status['rate_limit_window_seconds']}s")
             print(f"      - Audit Logging: ON")
         else:
-            print(f"   ⚪ Security: Available but disabled (set ENABLE_SECURITY=true to enable)")
+            print(f"   ΓÜ¬ Security: Available but disabled (set ENABLE_SECURITY=true to enable)")
 
     if MONITORING_AVAILABLE:
         if monitoring_config.enabled:
@@ -837,18 +836,18 @@ if __name__ == "__main__":
             print(f"      - Dashboard: http://localhost:{port}/monitoring/dashboard")
             print(f"      - Prometheus: http://localhost:{port}/metrics")
         else:
-            print(f"   ⚪ Monitoring: Available but disabled (set ENABLE_MONITORING=true to enable)")
+            print(f"   ΓÜ¬ Monitoring: Available but disabled (set ENABLE_MONITORING=true to enable)")
 
     if DATABASE_AVAILABLE and database:
         db_health = database.get_health()
         if db_health.get("enabled"):
-            print(f"   🗄️ SQLite: ENABLED")
+            print(f"   ≡ƒùä∩╕Å SQLite: ENABLED")
             print(f"      - Path: {db_health.get('path')}")
             print(f"      - Connected: {'YES' if db_health.get('connected') else 'NO'}")
             print(f"      - DB Health: http://localhost:{port}/db/health")
             print(f"      - DB Stats: http://localhost:{port}/db/stats")
         else:
-            print(f"   ⚪ SQLite: Available but disabled (set ENABLE_DATABASE=true to enable)")
+            print(f"   ΓÜ¬ SQLite: Available but disabled (set ENABLE_DATABASE=true to enable)")
 
     uvicorn.run(
         "feature_flag_env.server.app:app",
