@@ -4,6 +4,18 @@ Set-StrictMode -Version Latest
 $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $repoRoot
 
+$localVenvPython = Join-Path $repoRoot '.venv\Scripts\python.exe'
+$parentVenvPython = Join-Path (Split-Path -Parent $repoRoot) '.venv\Scripts\python.exe'
+if (Test-Path -LiteralPath $localVenvPython) {
+    $pythonExe = $localVenvPython
+}
+elseif (Test-Path -LiteralPath $parentVenvPython) {
+    $pythonExe = $parentVenvPython
+}
+else {
+    $pythonExe = 'python'
+}
+
 $results = New-Object System.Collections.Generic.List[object]
 
 function Add-Result {
@@ -35,7 +47,7 @@ function Invoke-PyTest {
     )
 
     Write-Host "`nRunning: $Name"
-    $output = & python -m pytest -o 'python_files=test_*.py' --ignore=test_results.txt @TestArgs 2>&1
+    $output = & $pythonExe -m pytest -o 'python_files=test_*.py' --ignore=test_results.txt @TestArgs 2>&1
     $exitCode = $LASTEXITCODE
     if ($exitCode -eq 0) {
         Add-Result -Name $Name -Passed $true -Details ($output | Select-Object -Last 1)
@@ -69,6 +81,46 @@ function Wait-ForHealth {
     return $false
 }
 
+function Invoke-RestWithRetry {
+    param(
+        [string]$Uri,
+        [string]$Method,
+        [hashtable]$Headers,
+        [int]$Retries = 3,
+        [int]$DelayMilliseconds = 700,
+        [string]$ContentType,
+        [string]$Body
+    )
+
+    $lastError = $null
+    for ($i = 1; $i -le $Retries; $i++) {
+        try {
+            $params = @{
+                Uri        = $Uri
+                Method     = $Method
+                TimeoutSec = 5
+                Headers    = $Headers
+            }
+            if (-not [string]::IsNullOrWhiteSpace($ContentType)) {
+                $params['ContentType'] = $ContentType
+            }
+            if (-not [string]::IsNullOrWhiteSpace($Body)) {
+                $params['Body'] = $Body
+            }
+
+            return Invoke-RestMethod @params
+        }
+        catch {
+            $lastError = $_
+            if ($i -lt $Retries) {
+                Start-Sleep -Milliseconds $DelayMilliseconds
+            }
+        }
+    }
+
+    throw $lastError
+}
+
 function Get-ValidationHeaders {
     param(
         [string]$EnvFilePath
@@ -99,9 +151,9 @@ function Get-ValidationHeaders {
 
 Write-Host '=== Feature Flag Validation ==='
 
-Invoke-PyTest -Name 'Monitoring tests' -Args @('tests/test_monitoring.py', '-q')
-Invoke-PyTest -Name 'Security tests' -Args @('tests/test_security.py', '-q')
-Invoke-PyTest -Name 'Full test suite' -Args @('tests/', '-q', '--ignore=test_results.txt')
+Invoke-PyTest -Name 'Monitoring tests' -TestArgs @('tests/test_monitoring.py', '-q')
+Invoke-PyTest -Name 'Security tests' -TestArgs @('tests/test_security.py', '-q')
+Invoke-PyTest -Name 'Full test suite' -TestArgs @('tests/', '-q', '--ignore=test_results.txt')
 
 Write-Host "`nStarting server on port 8001..."
 $existingListener = Get-NetTCPConnection -LocalPort 8001 -State Listen -ErrorAction SilentlyContinue
@@ -109,15 +161,40 @@ if ($null -ne $existingListener) {
     $existingListener | ForEach-Object {
         Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue
     }
+    Start-Sleep -Seconds 1
 }
 
+$previousEnableSecurity = $env:ENABLE_SECURITY
+$previousRequireAuth = $env:REQUIRE_AUTH
+$previousEnableDatabase = $env:ENABLE_DATABASE
+
+# Keep validation deterministic regardless of local .env values.
+$env:ENABLE_SECURITY = 'false'
+$env:REQUIRE_AUTH = 'false'
+$env:ENABLE_DATABASE = 'false'
 $env:ENV_PORT = '8001'
-$validationHeaders = Get-ValidationHeaders -EnvFilePath (Join-Path $repoRoot '.env')
-$serverProcess = Start-Process -FilePath 'python' -ArgumentList @('-m', 'uvicorn', 'feature_flag_env.server.app:app', '--host', '127.0.0.1', '--port', '8001') -PassThru -WindowStyle Hidden
+$validationHeaders = @{}
+$logsDir = Join-Path $repoRoot 'logs'
+if (-not (Test-Path -LiteralPath $logsDir)) {
+    New-Item -ItemType Directory -Path $logsDir | Out-Null
+}
+$serverStdOut = Join-Path $logsDir 'validation_server.out.log'
+$serverStdErr = Join-Path $logsDir 'validation_server.err.log'
+
+$serverProcess = Start-Process -FilePath $pythonExe -ArgumentList @('-m', 'uvicorn', 'feature_flag_env.server.app:app', '--host', '127.0.0.1', '--port', '8001') -PassThru -WindowStyle Hidden -RedirectStandardOutput $serverStdOut -RedirectStandardError $serverStdErr
+
+Start-Sleep -Seconds 1
+if ($serverProcess.HasExited) {
+    $errTail = ''
+    if (Test-Path -LiteralPath $serverStdErr) {
+        $errTail = (Get-Content -LiteralPath $serverStdErr | Select-Object -Last 10) -join ' | '
+    }
+    Add-Result -Name 'Server startup' -Passed $false -Details ("Server exited early. " + $errTail)
+}
 
 try {
-    $serverReady = Wait-ForHealth -Url 'http://127.0.0.1:8001/health' -TimeoutSeconds 30 -Headers $validationHeaders
-    if (-not $serverReady) {
+    $serverReady = if ($serverProcess.HasExited) { $false } else { Wait-ForHealth -Url 'http://127.0.0.1:8001/health' -TimeoutSeconds 30 -Headers $validationHeaders }
+    if (-not $serverReady -and -not $serverProcess.HasExited) {
         Add-Result -Name 'Server startup' -Passed $false -Details 'Health endpoint did not respond in time'
     }
     else {
@@ -132,23 +209,53 @@ try {
             Add-Result -Name '/health endpoint' -Passed $false -Details $_.Exception.Message
         }
 
+        $resetOk = $false
         try {
-            $reset = Invoke-RestMethod -Uri 'http://127.0.0.1:8001/reset' -Method Post -TimeoutSec 5 -Headers $validationHeaders
-            $ok = $null -ne $reset.observation -and $null -ne $reset.info
-            Add-Result -Name '/reset endpoint' -Passed $ok -Details 'Reset returned observation and info'
+            $reset = Invoke-RestWithRetry -Uri 'http://127.0.0.1:8001/reset' -Method 'Post' -Headers $validationHeaders -Retries 3 -DelayMilliseconds 700
+            $resetOk = $null -ne $reset.observation -and $null -ne $reset.info
+            Add-Result -Name '/reset endpoint' -Passed $resetOk -Details 'Reset returned observation and info'
         }
         catch {
-            Add-Result -Name '/reset endpoint' -Passed $false -Details $_.Exception.Message
+            $detail = $_.Exception.Message
+            try {
+                if ($_.Exception.Response) {
+                    $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+                    $bodyText = $reader.ReadToEnd()
+                    if (-not [string]::IsNullOrWhiteSpace($bodyText)) {
+                        $detail = "$detail | body=$bodyText"
+                    }
+                }
+            }
+            catch {
+            }
+            Add-Result -Name '/reset endpoint' -Passed $false -Details $detail
         }
 
-        try {
-            $body = @{ action_type = 'INCREASE_ROLLOUT'; target_percentage = 10; reason = 'validation run' } | ConvertTo-Json
-            $step = Invoke-RestMethod -Uri 'http://127.0.0.1:8001/step' -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 5 -Headers $validationHeaders
-            $ok = $null -ne $step.observation -and $null -ne $step.reward
-            Add-Result -Name '/step endpoint' -Passed $ok -Details ('reward=' + $step.reward)
+        if ($resetOk) {
+            try {
+                $body = @{ action_type = 'INCREASE_ROLLOUT'; target_percentage = 10; reason = 'validation run' } | ConvertTo-Json
+                $step = Invoke-RestWithRetry -Uri 'http://127.0.0.1:8001/step' -Method 'Post' -Headers $validationHeaders -Retries 3 -DelayMilliseconds 700 -ContentType 'application/json' -Body $body
+                $ok = $null -ne $step.observation -and $null -ne $step.reward
+                Add-Result -Name '/step endpoint' -Passed $ok -Details ('reward=' + $step.reward)
+            }
+            catch {
+                $detail = $_.Exception.Message
+                try {
+                    if ($_.Exception.Response) {
+                        $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+                        $bodyText = $reader.ReadToEnd()
+                        if (-not [string]::IsNullOrWhiteSpace($bodyText)) {
+                            $detail = "$detail | body=$bodyText"
+                        }
+                    }
+                }
+                catch {
+                }
+                Add-Result -Name '/step endpoint' -Passed $false -Details $detail
+            }
         }
-        catch {
-            Add-Result -Name '/step endpoint' -Passed $false -Details $_.Exception.Message
+        else {
+            Add-Result -Name '/step endpoint' -Passed $false -Details 'Skipped because /reset failed'
         }
 
         try {
@@ -200,6 +307,27 @@ try {
 finally {
     if ($null -ne $serverProcess -and -not $serverProcess.HasExited) {
         Stop-Process -Id $serverProcess.Id -Force
+    }
+
+    if ($null -eq $previousEnableSecurity) {
+        Remove-Item Env:ENABLE_SECURITY -ErrorAction SilentlyContinue
+    }
+    else {
+        $env:ENABLE_SECURITY = $previousEnableSecurity
+    }
+
+    if ($null -eq $previousRequireAuth) {
+        Remove-Item Env:REQUIRE_AUTH -ErrorAction SilentlyContinue
+    }
+    else {
+        $env:REQUIRE_AUTH = $previousRequireAuth
+    }
+
+    if ($null -eq $previousEnableDatabase) {
+        Remove-Item Env:ENABLE_DATABASE -ErrorAction SilentlyContinue
+    }
+    else {
+        $env:ENABLE_DATABASE = $previousEnableDatabase
     }
 }
 
