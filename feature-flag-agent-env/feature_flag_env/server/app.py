@@ -1,4 +1,4 @@
-﻿"""
+"""
 feature_flag_env/server/app.py
 
 FastAPI Server for OpenEnv-Compliant Feature Flag Environment
@@ -14,6 +14,7 @@ environment remotely, which is required for OpenEnv specification.
 """
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, Literal
 from contextlib import asynccontextmanager
@@ -234,6 +235,12 @@ class HealthResponse(BaseModel):
 # =========================
 # ENDPOINTS
 # =========================
+
+@app.get("/", include_in_schema=False)
+async def root():
+    """Redirect root to UI documentation."""
+    return RedirectResponse(url="/docs")
+
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
