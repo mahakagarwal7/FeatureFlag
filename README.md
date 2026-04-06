@@ -1,3 +1,12 @@
+---
+title: Feature Flag Simulation
+emoji: 🚀
+colorFrom: blue
+colorTo: red
+sdk: docker
+app_port: 7860
+---
+
 # 🚀 FeatureFlag-Agent-Env
 
 **AI-Powered Intelligent Feature Rollout & Risk Management Simulation**
