@@ -442,8 +442,16 @@ class SecurityMiddleware(BaseHTTPMiddleware):
     - Audit logging of all requests
     """
     
+    # OpenEnv validator endpoints that MUST remain public for compliance testing
+    OPENENV_PUBLIC_PATHS = {"/reset", "/step", "/state", "/info", "/health"}
+    
     async def dispatch(self, request: Request, call_next):
         """Process request through security checks"""
+        
+        # Always allow OpenEnv endpoints without auth (required for validator)
+        if request.url.path in self.OPENENV_PUBLIC_PATHS:
+            response = await call_next(request)
+            return response
         
         # Get user (or "anonymous" if auth disabled/not required)
         try:
