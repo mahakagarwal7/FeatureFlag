@@ -28,7 +28,13 @@ dependencies = [
     "python-dotenv>=1.0.0",  # For loading .env files
     "pytest>=7.0.0",         # For testing
     "httpx>=0.24.0",         # For async HTTP requests
+
+    # 📦 OpenEnv (required for validation & deployment)
+    "openenv-core>=0.2.0",
 ]
+
+[project.scripts]
+server = "server.app:main"
 
 [project.optional-dependencies]
 dev = [
@@ -38,4 +44,4 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["feature_flag_env*", "agents*", "configs*"]
+include = ["feature_flag_env*", "agents*", "configs*", "server*"]

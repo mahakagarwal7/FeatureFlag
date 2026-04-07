@@ -386,20 +386,15 @@ async def get_authenticated_user(request: Request) -> str:
         HTTPException: If authentication fails
     """
     # Allow bootstrap/public routes without auth so deployments can initialize,
-    # health checks can pass, and users can obtain a token, and validators can test.
-    public_paths = {
-        "/",
-        "/health",
-        "/openapi.json",
-        "/redoc",
-        "/docs",
+    # health checks can pass, users can obtain a token, and validators can test.
+    # NOTE: These MUST stay in sync with SecurityMiddleware.OPENENV_PUBLIC_PATHS
+    # and SecurityMiddleware.ALWAYS_PUBLIC_PATHS.
+    OPENENV_PUBLIC_PATHS = {"/reset", "/step", "/state", "/info", "/health"}
+    ALWAYS_PUBLIC_PATHS = {
+        "/", "/docs", "/redoc", "/openapi.json", "/favicon.ico",
         "/security/token",
-        "/favicon.ico",
-        "/reset",
-        "/step",
-        "/state",
-        "/info",
     }
+    public_paths = OPENENV_PUBLIC_PATHS | ALWAYS_PUBLIC_PATHS
     if request.url.path in public_paths or request.url.path.startswith("/docs"):
         return "anonymous"
     
@@ -445,11 +440,23 @@ class SecurityMiddleware(BaseHTTPMiddleware):
     # OpenEnv validator endpoints that MUST remain public for compliance testing
     OPENENV_PUBLIC_PATHS = {"/reset", "/step", "/state", "/info", "/health"}
     
+    # Additional paths that should always be accessible (docs, root, etc.)
+    ALWAYS_PUBLIC_PATHS = {
+        "/", "/docs", "/redoc", "/openapi.json", "/favicon.ico",
+        "/security/token",  # Allow obtaining tokens without existing auth
+    }
+    
     async def dispatch(self, request: Request, call_next):
         """Process request through security checks"""
+        path = request.url.path
         
         # Always allow OpenEnv endpoints without auth (required for validator)
-        if request.url.path in self.OPENENV_PUBLIC_PATHS:
+        if path in self.OPENENV_PUBLIC_PATHS:
+            response = await call_next(request)
+            return response
+        
+        # Always allow docs/root endpoints
+        if path in self.ALWAYS_PUBLIC_PATHS or path.startswith("/docs"):
             response = await call_next(request)
             return response
         
