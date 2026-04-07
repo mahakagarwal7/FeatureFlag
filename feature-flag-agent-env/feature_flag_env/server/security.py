@@ -398,6 +398,10 @@ async def get_authenticated_user(request: Request) -> str:
         "/docs",
         "/security/token",
         "/favicon.ico",
+        "/reset",
+        "/step",
+        "/state",
+        "/info",
     }
     if request.url.path in public_paths or request.url.path.startswith("/docs"):
         return "anonymous"
