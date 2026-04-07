@@ -387,6 +387,20 @@ async def get_authenticated_user(request: Request) -> str:
     """
     if not config.enabled or not config.require_auth:
         return "anonymous"
+
+    # Allow bootstrap/public routes without auth so deployments can initialize,
+    # health checks can pass, and users can obtain a token.
+    public_paths = {
+        "/",
+        "/health",
+        "/openapi.json",
+        "/redoc",
+        "/docs",
+        "/security/token",
+        "/favicon.ico",
+    }
+    if request.url.path in public_paths or request.url.path.startswith("/docs"):
+        return "anonymous"
     
     # Try JWT token first
     token = extract_token(request)
