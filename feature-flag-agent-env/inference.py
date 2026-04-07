@@ -21,6 +21,7 @@ import os
 import sys
 import json
 import re
+from pathlib import Path
 from typing import List, Dict, Any
 import statistics
 
@@ -29,6 +30,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from feature_flag_env.models import FeatureFlagAction, FeatureFlagObservation
 from feature_flag_env.tasks.graders import get_grader
+
+SUCCESS_SCORE_THRESHOLD = 0.1
 
 
 def _hitl_decision_label(reason: str) -> str:
@@ -107,9 +110,34 @@ def _print_ensemble_stats(agent) -> None:
     print(f"   LLM wins: {stats['llm_wins']}", file=sys.stderr)
 
 
-def _emit_structured(tag: str, payload: Dict[str, Any]) -> None:
-    """Emit strict structured stdout logs for validator parsing."""
-    print(f"[{tag}] {json.dumps(payload, separators=(',', ':'), ensure_ascii=True)}")
+def _format_reward(value: float) -> str:
+    return f"{float(value):.2f}"
+
+
+def _format_bool(value: bool) -> str:
+    return str(bool(value)).lower()
+
+
+def _stdout_start(task: str, env_name: str, model: str) -> None:
+    print(f"[START] task={task} env={env_name} model={model}", flush=True)
+
+
+def _stdout_step(step: int, action: str, reward: float, done: bool, error: str | None) -> None:
+    error_value = error if error else "null"
+    print(
+        f"[STEP] step={step} action={action} reward={_format_reward(reward)} "
+        f"done={_format_bool(done)} error={error_value}",
+        flush=True,
+    )
+
+
+def _stdout_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
+    rewards_value = ",".join(_format_reward(reward) for reward in rewards)
+    print(
+        f"[END] success={_format_bool(success)} steps={steps} "
+        f"score={_format_reward(score)} rewards={rewards_value}",
+        flush=True,
+    )
 
 
 # =============================================================================
@@ -311,19 +339,22 @@ class EnvironmentClient:
         self.headers = self._build_auth_headers()
 
         if not use_server:
-            # Use task-specific direct environment when possible
-            if task == "task1":
-                from feature_flag_env.tasks.task1_safe_rollout import make_task1_environment
-                self.env = make_task1_environment()
-            elif task == "task2":
-                from feature_flag_env.tasks.task2_risk_aware import make_task2_environment
-                self.env = make_task2_environment()
-            elif task == "task3":
-                from feature_flag_env.tasks.task3_multi_objective import make_task3_environment
-                self.env = make_task3_environment()
-            else:
-                from feature_flag_env.server.feature_flag_environment import FeatureFlagEnvironment
-                self.env = FeatureFlagEnvironment(scenario_config={"task_name": task})
+            self._create_local_env()
+
+    def _create_local_env(self) -> None:
+        # Use task-specific direct environment when possible.
+        if self.task == "task1":
+            from feature_flag_env.tasks.task1_safe_rollout import make_task1_environment
+            self.env = make_task1_environment()
+        elif self.task == "task2":
+            from feature_flag_env.tasks.task2_risk_aware import make_task2_environment
+            self.env = make_task2_environment()
+        elif self.task == "task3":
+            from feature_flag_env.tasks.task3_multi_objective import make_task3_environment
+            self.env = make_task3_environment()
+        else:
+            from feature_flag_env.server.feature_flag_environment import FeatureFlagEnvironment
+            self.env = FeatureFlagEnvironment(scenario_config={"task_name": self.task})
 
     def _build_auth_headers(self) -> Dict[str, str]:
         headers: Dict[str, str] = {}
@@ -384,8 +415,9 @@ class EnvironmentClient:
             if "observation" not in data:
                 raise RuntimeError(f"Unexpected reset payload: {data}")
             return FeatureFlagObservation(**data["observation"])
-        else:
-            return self.env.reset()
+        if self.env is None:
+            self._create_local_env()
+        return self.env.reset()
     
     def step(self, action: FeatureFlagAction) -> tuple:
         """Execute action"""
@@ -421,6 +453,14 @@ class EnvironmentClient:
         else:
             return self.env.state().model_dump()
 
+    def close(self) -> None:
+        if self.use_server or self.env is None:
+            return
+        close_fn = getattr(self.env, "close", None)
+        if callable(close_fn):
+            close_fn()
+        self.env = None
+
 
 # =============================================================================
 # MAIN RUNNER
@@ -429,6 +469,8 @@ def run_episode(
     agent,
     env_client,
     task: str = "task1",
+    benchmark: str = "feature-flag-agent-env",
+    model_name: str = "gpt-4o-mini",
     debug: bool = False,
     enable_hitl_audit: bool = False,
     episode_index: int = 1,
@@ -444,84 +486,91 @@ def run_episode(
     Returns:
         Dictionary with episode results
     """
-    # Reset environment
-    obs = env_client.reset()
-    
-    # Track trajectory for grading
+    _stdout_start(task=task, env_name=benchmark, model=model_name)
+
     trajectory = []
-    total_reward = 0.0
+    rewards: List[float] = []
     history = []
     hitl_audit_rows: List[Dict[str, str]] = []
-    
     step_count = 0
-    while not obs.done and step_count < 50:
-        # Agent decides action
-        action = agent.decide(obs, history)
-        
-        # Execute action
-        obs, reward, done, info = env_client.step(action)
-        
-        # Record step
-        trajectory.append({
-            "observation": obs,
-            "action": action,
-            "reward": reward
-        })
-        history.append({"obs": obs, "action": action, "reward": reward})
-        total_reward += reward
+    success = False
+    score = 0.0
+    obs = None
+
+    try:
+        obs = env_client.reset()
+
+        while not obs.done and step_count < 50:
+            action = agent.decide(obs, history)
+            obs, reward, done, info = env_client.step(action)
+
+            trajectory.append({
+                "observation": obs,
+                "action": action,
+                "reward": reward
+            })
+            history.append({"obs": obs, "action": action, "reward": reward})
+            rewards.append(float(reward))
+            step_count += 1
+
+            if enable_hitl_audit:
+                hitl_audit_rows.append(
+                    {
+                        "step": str(step_count),
+                        "decision": _hitl_decision_label(action.reason),
+                        "action": action.action_type,
+                        "target": f"{action.target_percentage:.1f}",
+                        "confidence": _extract_confidence(action.reason),
+                    }
+                )
+
+            error_value = None
+            if isinstance(info, dict):
+                error_value = info.get("last_action_error") or info.get("error")
+
+            _stdout_step(
+                step=step_count,
+                action=action.action_type,
+                reward=reward,
+                done=done,
+                error=error_value,
+            )
+
+            if done:
+                break
+
+        if hasattr(agent, "on_episode_end") and obs is not None:
+            try:
+                agent.on_episode_end(obs)
+            except Exception:
+                pass
+
+        grader = get_grader(task)
+        score = float(grader.grade(trajectory)) if trajectory else 0.0
+        score = max(0.0, min(1.0, score))
+        success = score >= SUCCESS_SCORE_THRESHOLD
 
         if enable_hitl_audit:
-            hitl_audit_rows.append(
-                {
-                    "step": str(step_count + 1),
-                    "decision": _hitl_decision_label(action.reason),
-                    "action": action.action_type,
-                    "target": f"{action.target_percentage:.1f}",
-                    "confidence": _extract_confidence(action.reason),
-                }
-            )
-        
-        _emit_structured(
-            "STEP",
-            {
-                "episode": episode_index,
-                "step": step_count + 1,
-                "task": task,
-                "action_type": action.action_type,
-                "target_percentage": round(float(action.target_percentage), 4),
-                "reward": round(float(reward), 6),
-                "error_rate": round(float(obs.error_rate), 6),
-                "health_score": round(float(obs.system_health_score), 6),
-                "done": bool(done),
-            },
-        )
-        
-        step_count += 1
-        
-        if done:
-            break
-    
-    # Final agent episode callback (optional)
-    if hasattr(agent, "on_episode_end"):
-        try:
-            agent.on_episode_end(obs)
-        except Exception:
-            pass
+            _print_hitl_audit_table(hitl_audit_rows)
 
-    # Grade trajectory
-    grader = get_grader(task)
-    score = grader.grade(trajectory)
-    
-    if enable_hitl_audit:
-        _print_hitl_audit_table(hitl_audit_rows)
-    
+    except Exception as exc:
+        print(f"WARNING: inference episode failed: {exc}", file=sys.stderr)
+        success = False
+        score = 0.0
+    finally:
+        try:
+            env_client.close()
+        except Exception as exc:
+            print(f"WARNING: env close failed: {exc}", file=sys.stderr)
+        _stdout_end(success=success, steps=step_count, score=score, rewards=rewards)
+
     return {
         "steps": step_count,
-        "total_reward": total_reward,
-        "final_rollout": obs.current_rollout_percentage,
-        "final_error_rate": obs.error_rate,
+        "total_reward": float(sum(rewards)),
+        "final_rollout": obs.current_rollout_percentage if obs is not None else 0.0,
+        "final_error_rate": obs.error_rate if obs is not None else 0.0,
         "score": score,
-        "trajectory": trajectory
+        "trajectory": trajectory,
     }
 
 
@@ -611,6 +660,12 @@ def main():
         default="",
         help="Optional weights format: rl=0.5,baseline=0.3,llm=0.2"
     )
+    parser.add_argument(
+        "--benchmark",
+        type=str,
+        default=os.getenv("BENCHMARK_NAME", "feature-flag-agent-env"),
+        help="Benchmark/environment label for stdout logs"
+    )
     
     args = parser.parse_args()
 
@@ -618,17 +673,7 @@ def main():
     os.environ["FF_ACTIVE_TASK"] = args.task
     
     use_server = bool(args.remote and not args.local)
-
-    _emit_structured(
-        "START",
-        {
-            "agent": args.agent,
-            "episodes": int(args.episodes),
-            "task": args.task,
-            "mode": "remote" if use_server else "local",
-            "server_url": args.server_url if use_server else "",
-        },
-    )
+    model_display = Path(args.rl_model).name if args.rl_model else os.getenv("MODEL_NAME", "gpt-4o-mini")
     
     if args.agent == "rl":
         from agents.rl_agent import RLAgent
@@ -687,12 +732,22 @@ def main():
                 agent,
                 env_client,
                 task=args.task,
+                benchmark=args.benchmark,
+                model_name=model_display,
                 debug=args.debug,
                 enable_hitl_audit=True,
                 episode_index=i + 1,
             )
         else:
-            result = run_episode(agent, env_client, task=args.task, debug=args.debug, episode_index=i + 1)
+            result = run_episode(
+                agent,
+                env_client,
+                task=args.task,
+                benchmark=args.benchmark,
+                model_name=model_display,
+                debug=args.debug,
+                episode_index=i + 1,
+            )
         scores.append(result["score"])
 
         if hasattr(agent, "decay_epsilon"):
@@ -701,26 +756,6 @@ def main():
         if hasattr(agent, "reset"):
             agent.reset()
             
-    # Summary
-    score_std = statistics.pstdev(scores) if len(scores) > 1 else 0.0
-
-    _emit_structured(
-        "END",
-        {
-            "agent": args.agent,
-            "episodes": int(args.episodes),
-            "task": args.task,
-            "mode": "remote" if use_server else "local",
-            "average_score": round(float(sum(scores) / len(scores)), 6),
-            "min_score": round(float(min(scores)), 6),
-            "max_score": round(float(max(scores)), 6),
-            "score_std_dev": round(float(score_std), 6),
-        },
-    )
-
-    if args.agent == "ensemble":
-        _print_ensemble_stats(agent)
-    
     return {
         "average_score": sum(scores) / len(scores),
         "min_score": min(scores),

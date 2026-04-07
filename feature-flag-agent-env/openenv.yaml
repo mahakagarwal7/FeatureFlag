@@ -50,6 +50,7 @@ docker:
     - API_BASE_URL
     - MODEL_NAME
     - HF_TOKEN
+    - LOCAL_IMAGE_NAME
     - ENV_HOST=0.0.0.0
     - ENV_PORT=8000
   

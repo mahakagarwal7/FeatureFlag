@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 
 try:
@@ -54,13 +55,15 @@ class HybridAgent:
                     f"[HYBRID DEBUG] override#{self.safety_overrides} "
                     f"proposed={proposed.action_type}({proposed.target_percentage}) "
                     f"error={observation.error_rate*100:.2f}% "
-                    f"health={observation.system_health_score:.2f}"
+                    f"health={observation.system_health_score:.2f}",
+                    file=sys.stderr,
                 )
             return safe_action
 
         if self.debug:
             print(
                 f"[HYBRID DEBUG] pass-through action={proposed.action_type} "
-                f"target={proposed.target_percentage} api_calls={self.api_calls}"
+                f"target={proposed.target_percentage} api_calls={self.api_calls}",
+                file=sys.stderr,
             )
         return proposed

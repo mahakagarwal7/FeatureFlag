@@ -20,9 +20,9 @@ dependencies = [
     "numpy>=1.24.0",
     "torch>=2.0.0",
     
-    # 🤖 LLM Integration (We chose Groq)
+    # 🤖 LLM Integration (OpenAI-compatible client)
     "groq>=0.4.0",
-    "openai>=1.0.0",  # Groq uses OpenAI-compatible client
+    "openai>=1.0.0",
     
     # 🔧 Utilities
     "python-dotenv>=1.0.0",  # For loading .env files

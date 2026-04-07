@@ -1,4 +1,5 @@
 import os
+import sys
 
 from feature_flag_env.models import FeatureFlagAction, FeatureFlagObservation
 
@@ -57,7 +58,7 @@ class BaselineAgent:
             action.target_percentage = min(action.target_percentage, 70.0)
 
             if debug:
-                print(f"[BASELINE DEBUG] err={error_rate:.2f}% rollout={current_rollout:.1f}% -> {action.action_type} {action.target_percentage:.1f}%")
+                print(f"[BASELINE DEBUG] err={error_rate:.2f}% rollout={current_rollout:.1f}% -> {action.action_type} {action.target_percentage:.1f}%", file=sys.stderr)
             return action
 
         if error_rate > 15:
@@ -104,5 +105,5 @@ class BaselineAgent:
                 )
 
         if debug:
-            print(f"[BASELINE DEBUG] err={error_rate:.2f}% rollout={current_rollout:.1f}% -> {action.action_type} {action.target_percentage:.1f}%")
+            print(f"[BASELINE DEBUG] err={error_rate:.2f}% rollout={current_rollout:.1f}% -> {action.action_type} {action.target_percentage:.1f}%", file=sys.stderr)
         return action

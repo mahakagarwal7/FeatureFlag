@@ -61,7 +61,7 @@ class LLMAgent:
 
         if self.debug:
             status = "enabled" if not self.use_baseline else "fallback"
-            print(f"[LLM DEBUG] startup status={status}, timeout={self.timeout_seconds}s")
+            print(f"[LLM DEBUG] startup status={status}, timeout={self.timeout_seconds}s", file=sys.stderr)
 
     def _parse_llm_json(self, content: str):
         text = (content or "").strip()
@@ -170,7 +170,7 @@ class LLMAgent:
     def decide(self, observation: FeatureFlagObservation, history):
         if self.use_baseline:
             if self.debug:
-                print("[LLM DEBUG] baseline fallback active (no API call)")
+                print("[LLM DEBUG] baseline fallback active (no API call)", file=sys.stderr)
             return self._fallback(observation, history)
 
         try:
@@ -179,7 +179,8 @@ class LLMAgent:
                 print(
                     f"[LLM DEBUG] API call #{self.api_calls} "
                     f"rollout={observation.current_rollout_percentage:.1f}% "
-                    f"error={observation.error_rate * 100:.2f}%"
+                    f"error={observation.error_rate * 100:.2f}%",
+                    file=sys.stderr,
                 )
 
             prompt = f"""
@@ -232,7 +233,8 @@ Respond with JSON only (no markdown, no prose):
                     if self.debug:
                         print(
                             f"[LLM DEBUG] transient API error, retrying in {sleep_for:.1f}s "
-                            f"(attempt {attempt + 1}/{self.max_retries})"
+                            f"(attempt {attempt + 1}/{self.max_retries})",
+                            file=sys.stderr,
                         )
                     time.sleep(sleep_for)
 
@@ -272,5 +274,5 @@ Respond with JSON only (no markdown, no prose):
             if self._should_retry(exc):
                 self.use_baseline = True
             if self.debug:
-                print(f"[LLM DEBUG] API failure #{self.api_failures}: {exc}")
+                print(f"[LLM DEBUG] API failure #{self.api_failures}: {exc}", file=sys.stderr)
             return self._fallback(observation, history)
