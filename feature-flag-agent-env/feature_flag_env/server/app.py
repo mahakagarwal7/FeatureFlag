@@ -144,7 +144,6 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,  # Γ£à Use lifespan instead of on_event
-    dependencies=[Depends(bearer_scheme), Depends(api_key_scheme)],
 )
 
 # Global environment instance (one per server)
