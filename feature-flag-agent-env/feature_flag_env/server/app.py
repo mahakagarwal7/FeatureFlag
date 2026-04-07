@@ -223,6 +223,18 @@ class StepRequest(BaseModel):
         max_length=500, 
         description="Agent's reasoning for this action"
     )
+    
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "action_type": "INCREASE_ROLLOUT",
+                    "target_percentage": 25.0,
+                    "reason": "Initial successful rollout, increasing up to next stage."
+                }
+            ]
+        }
+    }
 
 
 class HealthResponse(BaseModel):
@@ -482,6 +494,17 @@ if SECURITY_AVAILABLE:
         """Request model for token generation"""
         username: str = Field(..., description="Username to create token for")
         hours: Optional[int] = Field(None, description="Token expiry hours (defaults to config)")
+        
+        model_config = {
+            "json_schema_extra": {
+                "examples": [
+                    {
+                        "username": "agent_alpha",
+                        "hours": 24
+                    }
+                ]
+            }
+        }
     
     
     class TokenResponse(BaseModel):
