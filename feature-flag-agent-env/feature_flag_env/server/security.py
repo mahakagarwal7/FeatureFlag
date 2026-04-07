@@ -385,11 +385,8 @@ async def get_authenticated_user(request: Request) -> str:
     Raises:
         HTTPException: If authentication fails
     """
-    if not config.enabled or not config.require_auth:
-        return "anonymous"
-
     # Allow bootstrap/public routes without auth so deployments can initialize,
-    # health checks can pass, and users can obtain a token.
+    # health checks can pass, and users can obtain a token, and validators can test.
     public_paths = {
         "/",
         "/health",
@@ -404,6 +401,14 @@ async def get_authenticated_user(request: Request) -> str:
         "/info",
     }
     if request.url.path in public_paths or request.url.path.startswith("/docs"):
+        return "anonymous"
+    
+    # If security is completely disabled, allow all requests
+    if not config.enabled:
+        return "anonymous"
+    
+    # If auth is not required (but security is enabled), allow all requests
+    if not config.require_auth:
         return "anonymous"
     
     # Try JWT token first
