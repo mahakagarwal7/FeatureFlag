@@ -1,198 +1,245 @@
 #!/usr/bin/env bash
-# Automated pre-submission checklist for OpenEnv submission.
+# validate-submission.sh — OpenEnv submission validator for this repo.
 
-set +e
+set -uo pipefail
 
-# Read required vars from .env/.env.example without sourcing (avoids CRLF parser issues).
+DOCKER_BUILD_TIMEOUT="${DOCKER_BUILD_TIMEOUT:-600}"
+if [ -t 1 ]; then
+  RED='\033[0;31m'
+  GREEN='\033[0;32m'
+  YELLOW='\033[1;33m'
+  BOLD='\033[1m'
+  NC='\033[0m'
+else
+  RED='' GREEN='' YELLOW='' BOLD='' NC=''
+fi
+
+run_with_timeout() {
+  local secs="$1"; shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$secs" "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "$secs" "$@"
+  else
+    "$@" &
+    local pid=$!
+    ( sleep "$secs" && kill "$pid" 2>/dev/null ) &
+    local watcher=$!
+    wait "$pid" 2>/dev/null
+    local rc=$?
+    kill "$watcher" 2>/dev/null
+    wait "$watcher" 2>/dev/null
+    return "$rc"
+  fi
+}
+
+portable_mktemp() {
+  local prefix="${1:-validate}"
+  mktemp "${TMPDIR:-/tmp}/${prefix}-XXXXXX" 2>/dev/null || mktemp
+}
+
+CLEANUP_FILES=()
+cleanup() { rm -f "${CLEANUP_FILES[@]+${CLEANUP_FILES[@]}}"; }
+trap cleanup EXIT
+
 load_env_var_from_file() {
   local key="$1"
   local file="$2"
-  if [ -f "$file" ]; then
+  if [ -f "$file" ] && [ -z "${!key:-}" ]; then
     local value
     value=$(grep -E "^${key}=" "$file" | tail -n 1 | cut -d'=' -f2- | tr -d '\r')
-    if [ -n "$value" ] && [ -z "${!key:-}" ]; then
+    if [ -n "$value" ]; then
       export "$key=$value"
     fi
   fi
 }
 
-for required_key in API_BASE_URL MODEL_NAME HF_TOKEN; do
-  load_env_var_from_file "$required_key" ".env"
-  load_env_var_from_file "$required_key" ".env.example"
+is_placeholder_value() {
+  local value="${1:-}"
+  local lower
+  lower=$(printf "%s" "$value" | tr '[:upper:]' '[:lower:]')
+  case "$lower" in
+    your_*|*token_here*|*api_key_here*|*local_image_name*|*change_me*|*placeholder*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+find_project_dir() {
+  local repo="$1"
+  if [ -f "$repo/openenv.yaml" ]; then
+    printf "%s" "$repo"
+    return 0
+  fi
+  if [ -f "$repo/feature-flag-agent-env/openenv.yaml" ]; then
+    printf "%s" "$repo/feature-flag-agent-env"
+    return 0
+  fi
+  return 1
+}
+
+PING_URL="${1:-}"
+REPO_DIR="${2:-.}"
+
+if [ -z "$PING_URL" ]; then
+  printf "Usage: %s <ping_url> [repo_dir]\n" "$0"
+  printf "\n"
+  printf "  ping_url   Your HuggingFace Space URL (e.g. https://your-space.hf.space)\n"
+  printf "  repo_dir   Path to your repo (default: current directory)\n"
+  exit 1
+fi
+
+if ! REPO_DIR="$(cd "$REPO_DIR" 2>/dev/null && pwd)"; then
+  printf "Error: directory '%s' not found\n" "${2:-.}"
+  exit 1
+fi
+
+if ! PROJECT_DIR="$(find_project_dir "$REPO_DIR")"; then
+  printf "Error: openenv.yaml not found in %s or %s/feature-flag-agent-env\n" "$REPO_DIR" "$REPO_DIR"
+  exit 1
+fi
+
+load_env_var_from_file API_BASE_URL "$PROJECT_DIR/.env"
+load_env_var_from_file MODEL_NAME "$PROJECT_DIR/.env"
+load_env_var_from_file HF_TOKEN "$PROJECT_DIR/.env"
+load_env_var_from_file LOCAL_IMAGE_NAME "$PROJECT_DIR/.env"
+load_env_var_from_file API_BASE_URL "$PROJECT_DIR/.env.example"
+load_env_var_from_file MODEL_NAME "$PROJECT_DIR/.env.example"
+load_env_var_from_file HF_TOKEN "$PROJECT_DIR/.env.example"
+load_env_var_from_file LOCAL_IMAGE_NAME "$PROJECT_DIR/.env.example"
+
+PING_URL="${PING_URL%/}"
+PASS=0
+
+log()  { printf "[%s] %b\n" "$(date -u +%H:%M:%S)" "$*"; }
+pass() { log "${GREEN}PASSED${NC} -- $1"; PASS=$((PASS + 1)); }
+fail() { log "${RED}FAILED${NC} -- $1"; }
+hint() { printf "  ${YELLOW}Hint:${NC} %b\n" "$1"; }
+stop_at() {
+  printf "\n"
+  printf "${RED}${BOLD}Validation stopped at %s.${NC} Fix the above before continuing.\n" "$1"
+  exit 1
+}
+
+printf "\n"
+printf "${BOLD}========================================${NC}\n"
+printf "${BOLD}  OpenEnv Submission Validator${NC}\n"
+printf "${BOLD}========================================${NC}\n"
+log "Repo:        $REPO_DIR"
+log "Project dir: $PROJECT_DIR"
+log "Ping URL:    $PING_URL"
+printf "\n"
+
+log "${BOLD}Step 0/4: Checking required environment variables${NC} ..."
+
+MISSING_ENV=0
+for key in API_BASE_URL MODEL_NAME HF_TOKEN LOCAL_IMAGE_NAME; do
+  if [ -z "${!key:-}" ]; then
+    fail "$key is not set"
+    MISSING_ENV=1
+  elif is_placeholder_value "${!key}"; then
+    fail "$key looks like a placeholder value"
+    MISSING_ENV=1
+  else
+    pass "$key is set"
+  fi
 done
 
-python_cmd_ok() {
-  local cmd="$1"
-  if [ "$cmd" = "py -3" ]; then
-    py -3 -c "import pydantic, fastapi, uvicorn" >/dev/null 2>&1
-  else
-    "$cmd" -c "import pydantic, fastapi, uvicorn" >/dev/null 2>&1
+if [ "$MISSING_ENV" -ne 0 ]; then
+  hint "Set missing variables in $PROJECT_DIR/.env or your shell environment."
+  stop_at "Step 0"
+fi
+
+log "${BOLD}Step 1/4: Pinging HF Space${NC} ($PING_URL/reset) ..."
+
+CURL_OUTPUT=$(portable_mktemp "validate-curl")
+CLEANUP_FILES+=("$CURL_OUTPUT")
+HTTP_CODE=$(curl -s -o "$CURL_OUTPUT" -w "%{http_code}" -X POST \
+  -H "Content-Type: application/json" -d '{}' \
+  "$PING_URL/reset" --max-time 30 2>/dev/null || printf "000")
+
+if [ "$HTTP_CODE" = "401" ] && [ -n "${HF_TOKEN:-}" ]; then
+  HTTP_CODE=$(curl -s -o "$CURL_OUTPUT" -w "%{http_code}" -X POST \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $HF_TOKEN" \
+    -d '{}' "$PING_URL/reset" --max-time 30 2>/dev/null || printf "000")
+fi
+
+if [ "$HTTP_CODE" = "200" ]; then
+  pass "HF Space is live and responds to /reset"
+elif [ "$HTTP_CODE" = "000" ]; then
+  fail "HF Space not reachable (connection failed or timed out)"
+  hint "Check your network connection and that the Space is running."
+  hint "Try: curl -s -o /dev/null -w '%{http_code}' -X POST $PING_URL/reset"
+  stop_at "Step 1"
+else
+  fail "HF Space /reset returned HTTP $HTTP_CODE (expected 200)"
+  if [ "$HTTP_CODE" = "401" ]; then
+    hint "The Space requires authorization. Ensure HF_TOKEN is valid and has access to this Space."
   fi
-}
+  hint "Make sure your Space is running and the URL is correct."
+  hint "Try opening $PING_URL in your browser first."
+  stop_at "Step 1"
+fi
 
-PYTHON_BIN=""
-if [ -n "${PYTHON_BIN_OVERRIDE:-}" ]; then
-  PYTHON_BIN="$PYTHON_BIN_OVERRIDE"
-elif command -v python >/dev/null 2>&1 && python_cmd_ok "python"; then
-  PYTHON_BIN="python"
-elif command -v py >/dev/null 2>&1 && python_cmd_ok "py -3"; then
-  PYTHON_BIN="py -3"
-elif command -v python3 >/dev/null 2>&1 && python_cmd_ok "python3"; then
-  PYTHON_BIN="python3"
-elif [ -x "/mnt/c/Users/Mahak/AppData/Local/Programs/Python/Python313/python.exe" ]; then
-  PYTHON_BIN="/mnt/c/Users/Mahak/AppData/Local/Programs/Python/Python313/python.exe"
-elif command -v python >/dev/null 2>&1; then
-  PYTHON_BIN="python"
-elif command -v py >/dev/null 2>&1; then
-  PYTHON_BIN="py -3"
+log "${BOLD}Step 2/4: Running docker build${NC} ..."
+
+if ! command -v docker >/dev/null 2>&1; then
+  fail "docker command not found"
+  hint "Install Docker: https://docs.docker.com/get-docker/"
+  stop_at "Step 2"
+fi
+
+if [ -f "$PROJECT_DIR/Dockerfile" ]; then
+  DOCKER_CONTEXT="$PROJECT_DIR"
+elif [ -f "$PROJECT_DIR/server/Dockerfile" ]; then
+  DOCKER_CONTEXT="$PROJECT_DIR/server"
 else
-  PYTHON_BIN="python3"
+  fail "No Dockerfile found in project root or server/ directory"
+  stop_at "Step 2"
 fi
 
-run_python() {
-  if [ "$PYTHON_BIN" = "py -3" ]; then
-    py -3 "$@"
-  else
-    "$PYTHON_BIN" "$@"
-  fi
-}
+log "  Found Dockerfile in $DOCKER_CONTEXT"
 
-PASS_COUNT=0
-FAIL_COUNT=0
+BUILD_OK=false
+BUILD_OUTPUT=$(run_with_timeout "$DOCKER_BUILD_TIMEOUT" docker build "$DOCKER_CONTEXT" 2>&1) && BUILD_OK=true
 
-check_result() {
-  if [ "$1" -eq 0 ]; then
-    echo "PASS: $2"
-    PASS_COUNT=$((PASS_COUNT + 1))
-  else
-    echo "FAIL: $2"
-    FAIL_COUNT=$((FAIL_COUNT + 1))
-  fi
-}
-
-echo "============================================================"
-echo "FEATURE FLAG AGENT - PRE-VALIDATION CHECKLIST"
-echo "============================================================"
-
-# Check 1: required files
-test -f "openenv.yaml"; check_result $? "openenv.yaml exists"
-test -f "inference.py"; check_result $? "inference.py exists"
-test -f "README.md"; check_result $? "README.md exists"
-test -f "pyproject.toml"; check_result $? "pyproject.toml exists"
-test -f ".gitignore"; check_result $? ".gitignore exists"
-
-# Check 2: OpenEnv spec
-grep -q "env_class:" openenv.yaml; check_result $? "env_class declared"
-grep -q "action_type:" openenv.yaml; check_result $? "action_type declared"
-grep -q "observation_type:" openenv.yaml; check_result $? "observation_type declared"
-grep -q "state_type:" openenv.yaml; check_result $? "state_type declared"
-
-# Check 3: Python/runtime
-run_python --version >/dev/null 2>&1; check_result $? "python runtime available"
-run_python -c "import pydantic" >/dev/null 2>&1; check_result $? "pydantic import works"
-run_python -c "import fastapi" >/dev/null 2>&1; check_result $? "fastapi import works"
-run_python -c "import uvicorn" >/dev/null 2>&1; check_result $? "uvicorn import works"
-
-# Check 4: inference runtime + structured logs
-if [ "$PYTHON_BIN" = "py -3" ]; then
-  timeout 120 py -3 inference.py --agent baseline --episodes 1 >/tmp/inference_test.log 2>&1
+if [ "$BUILD_OK" = true ]; then
+  pass "Docker build succeeded"
 else
-  timeout 120 "$PYTHON_BIN" inference.py --agent baseline --episodes 1 >/tmp/inference_test.log 2>&1
+  fail "Docker build failed (timeout=${DOCKER_BUILD_TIMEOUT}s)"
+  printf "%s\n" "$BUILD_OUTPUT" | tail -20
+  stop_at "Step 2"
 fi
-check_result $? "inference.py baseline run succeeds"
 
-grep -q "^\[START\]" /tmp/inference_test.log; check_result $? "[START] log emitted"
-grep -q "^\[STEP\]" /tmp/inference_test.log; check_result $? "[STEP] log emitted"
-grep -q "^\[END\]" /tmp/inference_test.log; check_result $? "[END] log emitted"
+log "${BOLD}Step 3/4: Running openenv validate${NC} ..."
 
-# Check 5: required environment variables
-if [ -z "$API_BASE_URL" ]; then
-  echo "FAIL: API_BASE_URL is not set"
-  FAIL_COUNT=$((FAIL_COUNT + 1))
+if ! command -v openenv >/dev/null 2>&1; then
+  fail "openenv command not found"
+  hint "Install it: pip install openenv-core"
+  stop_at "Step 3"
+fi
+
+VALIDATE_OK=false
+VALIDATE_OUTPUT=$(cd "$PROJECT_DIR" && openenv validate 2>&1) && VALIDATE_OK=true
+
+if [ "$VALIDATE_OK" = true ]; then
+  pass "openenv validate passed"
+  [ -n "$VALIDATE_OUTPUT" ] && log "  $VALIDATE_OUTPUT"
 else
-  echo "PASS: API_BASE_URL is set"
-  PASS_COUNT=$((PASS_COUNT + 1))
+  fail "openenv validate failed"
+  printf "%s\n" "$VALIDATE_OUTPUT"
+  stop_at "Step 3"
 fi
 
-if [ -z "$MODEL_NAME" ]; then
-  echo "FAIL: MODEL_NAME is not set"
-  FAIL_COUNT=$((FAIL_COUNT + 1))
-else
-  echo "PASS: MODEL_NAME is set"
-  PASS_COUNT=$((PASS_COUNT + 1))
-fi
+printf "\n"
+printf "${BOLD}========================================${NC}\n"
+printf "${GREEN}${BOLD}  All %s/4 checks passed!${NC}\n" "$PASS"
+printf "${GREEN}${BOLD}  Your submission is ready to submit.${NC}\n"
+printf "${BOLD}========================================${NC}\n"
+printf "\n"
 
-if [ -z "$HF_TOKEN" ]; then
-  echo "FAIL: HF_TOKEN is not set"
-  FAIL_COUNT=$((FAIL_COUNT + 1))
-else
-  echo "PASS: HF_TOKEN is set"
-  PASS_COUNT=$((PASS_COUNT + 1))
-fi
-
-# Check 6: tasks and grader score range
-test -f "feature_flag_env/tasks/graders.py"; check_result $? "graders.py exists"
-run_python -c "from feature_flag_env.tasks.graders import Task1Grader, Task2Grader, Task3Grader" >/dev/null 2>&1
-check_result $? "all three grader classes import"
-
-run_python - <<'PY'
-from agents.baseline_agent import BaselineAgent
-from feature_flag_env.tasks.task1_safe_rollout import make_task1_environment
-from feature_flag_env.tasks.task2_risk_aware import make_task2_environment
-from feature_flag_env.tasks.task3_multi_objective import make_task3_environment
-from feature_flag_env.tasks.graders import get_grader
-
-tasks = [
-    ("task1", make_task1_environment),
-    ("task2", make_task2_environment),
-    ("task3", make_task3_environment),
-]
-
-for name, maker in tasks:
-    env = maker()
-    agent = BaselineAgent()
-    obs = env.reset()
-    history = []
-    trajectory = []
-    done = False
-    steps = 0
-    while not done and steps < 60:
-        action = agent.decide(obs, history)
-        response = env.step(action)
-        obs = response.observation
-        done = response.done
-        trajectory.append({"observation": obs, "action": action, "reward": response.reward})
-        history.append({"obs": obs, "action": action, "reward": response.reward})
-        steps += 1
-    score = get_grader(name).grade(trajectory)
-    if not (0.0 <= score <= 1.0):
-        raise SystemExit(f"score out of range for {name}: {score}")
-print("grader-range-ok")
-PY
-check_result $? "all task grader scores within [0.0,1.0]"
-
-# Check 7: server startup probe
-if [ "$PYTHON_BIN" = "py -3" ]; then
-  timeout 15 py -3 feature_flag_env/server/app.py >/tmp/server_test.log 2>&1 || true
-else
-  timeout 15 "$PYTHON_BIN" feature_flag_env/server/app.py >/tmp/server_test.log 2>&1 || true
-fi
-if grep -Eq "Uvicorn running|Application startup complete|Started server process" /tmp/server_test.log; then
-  check_result 0 "server starts"
-else
-  check_result 1 "server starts"
-fi
-
-echo "============================================================"
-echo "VALIDATION SUMMARY"
-echo "============================================================"
-echo "Passed: $PASS_COUNT"
-echo "Failed: $FAIL_COUNT"
-
-if [ "$FAIL_COUNT" -eq 0 ]; then
-  echo "PASS: all critical checks passed"
-  exit 0
-fi
-
-echo "FAIL: one or more checks failed"
-exit 1
+exit 0
