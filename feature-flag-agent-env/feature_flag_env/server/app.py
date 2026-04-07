@@ -13,7 +13,8 @@ This allows agents (LLM, baseline, etc.) to interact with the
 environment remotely, which is required for OpenEnv specification.
 """
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Depends
+from fastapi.security import HTTPBearer, APIKeyHeader
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, Literal
@@ -133,6 +134,9 @@ async def lifespan(app: FastAPI):
     environment = None
 
 
+bearer_scheme = HTTPBearer(auto_error=False)
+api_key_scheme = APIKeyHeader(name="X-API-Key", auto_error=False)
+
 app = FastAPI(
     title="Feature Flag Agent Environment",
     description="OpenEnv-compliant simulation for AI-powered feature rollout",
@@ -140,6 +144,7 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,  # Γ£à Use lifespan instead of on_event
+    dependencies=[Depends(bearer_scheme), Depends(api_key_scheme)],
 )
 
 # Global environment instance (one per server)
