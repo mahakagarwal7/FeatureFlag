@@ -1,174 +1,198 @@
 #!/usr/bin/env bash
-# =============================================================================
-# pre_validation.sh
-# 
-# Automated checklist for Meta OpenEnv Hackathon submission.
-# Run this BEFORE submitting to catch issues early.
-# 
-# Usage: ./pre_validation.sh
-# =============================================================================
+# Automated pre-submission checklist for OpenEnv submission.
 
-set +e  # Exit on error
+set +e
 
-echo "============================================================"
-echo "🔍 FEATURE FLAG AGENT - PRE-VALIDATION CHECKLIST"
-echo "============================================================"
-echo ""
+# Read required vars from .env/.env.example without sourcing (avoids CRLF parser issues).
+load_env_var_from_file() {
+  local key="$1"
+  local file="$2"
+  if [ -f "$file" ]; then
+    local value
+    value=$(grep -E "^${key}=" "$file" | tail -n 1 | cut -d'=' -f2- | tr -d '\r')
+    if [ -n "$value" ] && [ -z "${!key:-}" ]; then
+      export "$key=$value"
+    fi
+  fi
+}
+
+for required_key in API_BASE_URL MODEL_NAME HF_TOKEN; do
+  load_env_var_from_file "$required_key" ".env"
+  load_env_var_from_file "$required_key" ".env.example"
+done
+
+python_cmd_ok() {
+  local cmd="$1"
+  if [ "$cmd" = "py -3" ]; then
+    py -3 -c "import pydantic, fastapi, uvicorn" >/dev/null 2>&1
+  else
+    "$cmd" -c "import pydantic, fastapi, uvicorn" >/dev/null 2>&1
+  fi
+}
+
+PYTHON_BIN=""
+if [ -n "${PYTHON_BIN_OVERRIDE:-}" ]; then
+  PYTHON_BIN="$PYTHON_BIN_OVERRIDE"
+elif command -v python >/dev/null 2>&1 && python_cmd_ok "python"; then
+  PYTHON_BIN="python"
+elif command -v py >/dev/null 2>&1 && python_cmd_ok "py -3"; then
+  PYTHON_BIN="py -3"
+elif command -v python3 >/dev/null 2>&1 && python_cmd_ok "python3"; then
+  PYTHON_BIN="python3"
+elif [ -x "/mnt/c/Users/Mahak/AppData/Local/Programs/Python/Python313/python.exe" ]; then
+  PYTHON_BIN="/mnt/c/Users/Mahak/AppData/Local/Programs/Python/Python313/python.exe"
+elif command -v python >/dev/null 2>&1; then
+  PYTHON_BIN="python"
+elif command -v py >/dev/null 2>&1; then
+  PYTHON_BIN="py -3"
+else
+  PYTHON_BIN="python3"
+fi
+
+run_python() {
+  if [ "$PYTHON_BIN" = "py -3" ]; then
+    py -3 "$@"
+  else
+    "$PYTHON_BIN" "$@"
+  fi
+}
 
 PASS_COUNT=0
 FAIL_COUNT=0
 
-# Helper function to check pass/fail
 check_result() {
-    if [ $1 -eq 0 ]; then
-        echo "✅ PASSED: $2"
-        PASS_COUNT=$((PASS_COUNT+1))
-    else
-        echo "❌ FAILED: $2"
-        FAIL_COUNT=$((FAIL_COUNT+1))
-    fi
+  if [ "$1" -eq 0 ]; then
+    echo "PASS: $2"
+    PASS_COUNT=$((PASS_COUNT + 1))
+  else
+    echo "FAIL: $2"
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+  fi
 }
 
-# =============================================================================
-# CHECK 1: Required Files Exist
-# =============================================================================
-echo "📁 Checking required files..."
+echo "============================================================"
+echo "FEATURE FLAG AGENT - PRE-VALIDATION CHECKLIST"
+echo "============================================================"
 
-test -f "openenv.yaml"
-check_result $? "openenv.yaml exists"
+# Check 1: required files
+test -f "openenv.yaml"; check_result $? "openenv.yaml exists"
+test -f "inference.py"; check_result $? "inference.py exists"
+test -f "README.md"; check_result $? "README.md exists"
+test -f "pyproject.toml"; check_result $? "pyproject.toml exists"
+test -f ".gitignore"; check_result $? ".gitignore exists"
 
-test -f "inference.py"
-check_result $? "inference.py exists"
+# Check 2: OpenEnv spec
+grep -q "env_class:" openenv.yaml; check_result $? "env_class declared"
+grep -q "action_type:" openenv.yaml; check_result $? "action_type declared"
+grep -q "observation_type:" openenv.yaml; check_result $? "observation_type declared"
+grep -q "state_type:" openenv.yaml; check_result $? "state_type declared"
 
-test -f "README.md"
-check_result $? "README.md exists"
+# Check 3: Python/runtime
+run_python --version >/dev/null 2>&1; check_result $? "python runtime available"
+run_python -c "import pydantic" >/dev/null 2>&1; check_result $? "pydantic import works"
+run_python -c "import fastapi" >/dev/null 2>&1; check_result $? "fastapi import works"
+run_python -c "import uvicorn" >/dev/null 2>&1; check_result $? "uvicorn import works"
 
-test -f "pyproject.toml"
-check_result $? "pyproject.toml exists"
-
-test -f ".gitignore"
-check_result $? ".gitignore exists"
-
-echo ""
-
-# =============================================================================
-# CHECK 2: OpenEnv Spec Compliance
-# =============================================================================
-echo "📋 Checking OpenEnv spec compliance..."
-
-grep -q "env_class:" openenv.yaml
-check_result $? "env_class defined in openenv.yaml"
-
-grep -q "action_type:" openenv.yaml
-check_result $? "action_type defined in openenv.yaml"
-
-grep -q "observation_type:" openenv.yaml
-check_result $? "observation_type defined in openenv.yaml"
-
-grep -q "state_type:" openenv.yaml
-check_result $? "state_type defined in openenv.yaml"
-
-echo ""
-
-# =============================================================================
-# CHECK 3: Python Environment
-# =============================================================================
-echo "🐍 Checking Python environment..."
-
-python --version > /dev/null 2>&1
-check_result $? "Python is installed"
-
-python -c "import pydantic" > /dev/null 2>&1
-check_result $? "pydantic is installed"
-
-python -c "import fastapi" > /dev/null 2>&1
-check_result $? "fastapi is installed"
-
-python -c "import uvicorn" > /dev/null 2>&1
-check_result $? "uvicorn is installed"
-
-echo ""
-
-# =============================================================================
-# CHECK 4: Run Inference Script
-# =============================================================================
-echo "🧪 Testing inference.py..."
-
-timeout 60 python inference.py --agent baseline --episodes 1 > /tmp/inference_test.log 2>&1
-check_result $? "inference.py runs successfully"
-
-echo ""
-
-# =============================================================================
-# CHECK 5: Environment Variables
-# =============================================================================
-echo "🔐 Checking environment configuration..."
-
-if [ -z "$GROQ_API_KEY" ]; then
-    echo "⚠️  WARNING: GROQ_API_KEY not set (LLM agent won't work)"
+# Check 4: inference runtime + structured logs
+if [ "$PYTHON_BIN" = "py -3" ]; then
+  timeout 120 py -3 inference.py --agent baseline --episodes 1 >/tmp/inference_test.log 2>&1
 else
-    echo "✅ PASSED: GROQ_API_KEY is set"
-    PASS_COUNT=$((PASS_COUNT+1))
+  timeout 120 "$PYTHON_BIN" inference.py --agent baseline --episodes 1 >/tmp/inference_test.log 2>&1
+fi
+check_result $? "inference.py baseline run succeeds"
+
+grep -q "^\[START\]" /tmp/inference_test.log; check_result $? "[START] log emitted"
+grep -q "^\[STEP\]" /tmp/inference_test.log; check_result $? "[STEP] log emitted"
+grep -q "^\[END\]" /tmp/inference_test.log; check_result $? "[END] log emitted"
+
+# Check 5: required environment variables
+if [ -z "$API_BASE_URL" ]; then
+  echo "FAIL: API_BASE_URL is not set"
+  FAIL_COUNT=$((FAIL_COUNT + 1))
+else
+  echo "PASS: API_BASE_URL is set"
+  PASS_COUNT=$((PASS_COUNT + 1))
+fi
+
+if [ -z "$MODEL_NAME" ]; then
+  echo "FAIL: MODEL_NAME is not set"
+  FAIL_COUNT=$((FAIL_COUNT + 1))
+else
+  echo "PASS: MODEL_NAME is set"
+  PASS_COUNT=$((PASS_COUNT + 1))
 fi
 
 if [ -z "$HF_TOKEN" ]; then
-    echo "⚠️  WARNING: HF_TOKEN not set (HF Spaces won't work)"
+  echo "FAIL: HF_TOKEN is not set"
+  FAIL_COUNT=$((FAIL_COUNT + 1))
 else
-    echo "✅ PASSED: HF_TOKEN is set"
-    PASS_COUNT=$((PASS_COUNT+1))
+  echo "PASS: HF_TOKEN is set"
+  PASS_COUNT=$((PASS_COUNT + 1))
 fi
 
-echo ""
+# Check 6: tasks and grader score range
+test -f "feature_flag_env/tasks/graders.py"; check_result $? "graders.py exists"
+run_python -c "from feature_flag_env.tasks.graders import Task1Grader, Task2Grader, Task3Grader" >/dev/null 2>&1
+check_result $? "all three grader classes import"
 
-# =============================================================================
-# CHECK 6: Tasks & Graders
-# =============================================================================
-echo "🎯 Checking tasks and graders..."
+run_python - <<'PY'
+from agents.baseline_agent import BaselineAgent
+from feature_flag_env.tasks.task1_safe_rollout import make_task1_environment
+from feature_flag_env.tasks.task2_risk_aware import make_task2_environment
+from feature_flag_env.tasks.task3_multi_objective import make_task3_environment
+from feature_flag_env.tasks.graders import get_grader
 
-test -f "feature_flag_env/tasks/graders.py"
-check_result $? "graders.py exists"
+tasks = [
+    ("task1", make_task1_environment),
+    ("task2", make_task2_environment),
+    ("task3", make_task3_environment),
+]
 
-python -c "from feature_flag_env.tasks.graders import Task1Grader, Task2Grader, Task3Grader" > /dev/null 2>&1
-check_result $? "All 3 graders can be imported"
+for name, maker in tasks:
+    env = maker()
+    agent = BaselineAgent()
+    obs = env.reset()
+    history = []
+    trajectory = []
+    done = False
+    steps = 0
+    while not done and steps < 60:
+        action = agent.decide(obs, history)
+        response = env.step(action)
+        obs = response.observation
+        done = response.done
+        trajectory.append({"observation": obs, "action": action, "reward": response.reward})
+        history.append({"obs": obs, "action": action, "reward": response.reward})
+        steps += 1
+    score = get_grader(name).grade(trajectory)
+    if not (0.0 <= score <= 1.0):
+        raise SystemExit(f"score out of range for {name}: {score}")
+print("grader-range-ok")
+PY
+check_result $? "all task grader scores within [0.0,1.0]"
 
-echo ""
-
-# =============================================================================
-# CHECK 7: Server Can Start
-# =============================================================================
-echo "🚀 Checking if server can start..."
-
-timeout 5 python feature_flag_env/server/app.py > /tmp/server_test.log 2>&1 || true
-grep -q "Uvicorn running" /tmp/server_test.log 2>/dev/null
-check_result $? "Server starts successfully"
-
-echo ""
-
-# =============================================================================
-# FINAL SUMMARY
-# =============================================================================
-echo "============================================================"
-echo "📊 VALIDATION SUMMARY"
-echo "============================================================"
-echo "   Passed: $PASS_COUNT"
-echo "   Failed: $FAIL_COUNT"
-echo ""
-
-if [ $FAIL_COUNT -eq 0 ]; then
-    echo "✅ ALL CRITICAL CHECKS PASSED!"
-    echo ""
-    echo "Your submission is ready!"
-    echo ""
-    echo "Next steps:"
-    echo "1. Push to Hugging Face Space"
-    echo "2. Verify Space is accessible"
-    echo "3. Submit your hackathon entry"
-    echo "4. Good luck! 🚀"
-    exit 0
+# Check 7: server startup probe
+if [ "$PYTHON_BIN" = "py -3" ]; then
+  timeout 15 py -3 feature_flag_env/server/app.py >/tmp/server_test.log 2>&1 || true
 else
-    echo "❌ SOME CHECKS FAILED!"
-    echo ""
-    echo "Please fix the failed checks before submitting."
-    echo "Run ./pre_validation.sh again after fixing."
-    exit 1
+  timeout 15 "$PYTHON_BIN" feature_flag_env/server/app.py >/tmp/server_test.log 2>&1 || true
 fi
+if grep -Eq "Uvicorn running|Application startup complete|Started server process" /tmp/server_test.log; then
+  check_result 0 "server starts"
+else
+  check_result 1 "server starts"
+fi
+
+echo "============================================================"
+echo "VALIDATION SUMMARY"
+echo "============================================================"
+echo "Passed: $PASS_COUNT"
+echo "Failed: $FAIL_COUNT"
+
+if [ "$FAIL_COUNT" -eq 0 ]; then
+  echo "PASS: all critical checks passed"
+  exit 0
+fi
+
+echo "FAIL: one or more checks failed"
+exit 1

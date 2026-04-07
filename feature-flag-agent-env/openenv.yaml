@@ -47,7 +47,8 @@ docker:
   
   # Environment variables needed at runtime
   env:
-    - GROQ_API_KEY
+    - API_BASE_URL
+    - MODEL_NAME
     - HF_TOKEN
     - ENV_HOST=0.0.0.0
     - ENV_PORT=8000

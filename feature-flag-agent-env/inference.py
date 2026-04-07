@@ -64,16 +64,17 @@ def _extract_confidence(reason: str) -> str:
 def _print_hitl_audit_table(rows: List[Dict[str, str]]) -> None:
     if not rows:
         return
-    print("\n🧾 HITL Decision Audit")
-    print("-" * 72)
-    print(f"{'Step':<6}{'Decision':<20}{'Action':<20}{'Target%':<10}{'Conf':<8}")
-    print("-" * 72)
+    print("\nHITL Decision Audit", file=sys.stderr)
+    print("-" * 72, file=sys.stderr)
+    print(f"{'Step':<6}{'Decision':<20}{'Action':<20}{'Target%':<10}{'Conf':<8}", file=sys.stderr)
+    print("-" * 72, file=sys.stderr)
     for row in rows:
         print(
             f"{row['step']:<6}{row['decision']:<20}{row['action']:<20}"
-            f"{row['target']:<10}{row['confidence']:<8}"
+            f"{row['target']:<10}{row['confidence']:<8}",
+            file=sys.stderr,
         )
-    print("-" * 72)
+    print("-" * 72, file=sys.stderr)
 
 
 def _parse_weight_string(weights_text: str) -> Dict[str, float] | None:
@@ -98,12 +99,17 @@ def _print_ensemble_stats(agent) -> None:
     if not hasattr(agent, "get_stats"):
         return
     stats = agent.get_stats()
-    print("\nEnsemble Stats:")
-    print(f"   Total decisions: {stats['total_decisions']}")
-    print(f"   Agreement rate: {stats['agreement_rate']:.1f}%")
-    print(f"   RL wins: {stats['rl_wins']}")
-    print(f"   Baseline wins: {stats['baseline_wins']}")
-    print(f"   LLM wins: {stats['llm_wins']}")
+    print("\nEnsemble Stats:", file=sys.stderr)
+    print(f"   Total decisions: {stats['total_decisions']}", file=sys.stderr)
+    print(f"   Agreement rate: {stats['agreement_rate']:.1f}%", file=sys.stderr)
+    print(f"   RL wins: {stats['rl_wins']}", file=sys.stderr)
+    print(f"   Baseline wins: {stats['baseline_wins']}", file=sys.stderr)
+    print(f"   LLM wins: {stats['llm_wins']}", file=sys.stderr)
+
+
+def _emit_structured(tag: str, payload: Dict[str, Any]) -> None:
+    """Emit strict structured stdout logs for validator parsing."""
+    print(f"[{tag}] {json.dumps(payload, separators=(',', ':'), ensure_ascii=True)}")
 
 
 # =============================================================================
@@ -155,29 +161,30 @@ class BaselineAgent:
 
 
 # =============================================================================
-# LLM AGENT (Groq)
+# LLM AGENT (OpenAI Client)
 # =============================================================================
 class LLMAgent:
     """
-    LLM-powered agent using Groq API.
+    LLM-powered agent using OpenAI-compatible API.
     
     Generates reasoning + action via language model.
     """
     
-    def __init__(self, model: str = "llama-3.1-8b-instant"):
-        self.model = model
-        self.api_key = os.getenv("GROQ_API_KEY")
+    def __init__(self, model: str = ""):
+        self.model = model or os.getenv("MODEL_NAME", "gpt-4o-mini")
+        self.api_key = os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY")
+        self.api_base_url = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
         
         if not self.api_key:
-            print("WARNING: GROQ_API_KEY is not set. Using the baseline agent instead.")
+            print("WARNING: HF_TOKEN/OPENAI_API_KEY is not set. Using the baseline agent instead.", file=sys.stderr)
             self.use_baseline = True
         else:
             self.use_baseline = False
             try:
-                from groq import Groq
-                self.client = Groq(api_key=self.api_key)
+                from openai import OpenAI
+                self.client = OpenAI(api_key=self.api_key, base_url=self.api_base_url)
             except ImportError:
-                print("WARNING: groq package is not installed. Using the baseline agent.")
+                print("WARNING: openai package is not installed. Using the baseline agent.", file=sys.stderr)
                 self.use_baseline = True
     
     def _build_prompt(self, obs: FeatureFlagObservation, history: List) -> str:
@@ -219,7 +226,7 @@ Respond with JSON only:
     def decide(self, observation: FeatureFlagObservation, history: List) -> FeatureFlagAction:
         """Decide action using LLM"""
         
-        # Fallback to baseline if Groq not available
+        # Fallback to baseline if API client not available
         if self.use_baseline:
             baseline = BaselineAgent()
             return baseline.decide(observation, history)
@@ -228,7 +235,7 @@ Respond with JSON only:
             # Build prompt
             prompt = self._build_prompt(observation, history)
             
-            # Call Groq API
+            # Call OpenAI-compatible API
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
@@ -236,7 +243,8 @@ Respond with JSON only:
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7,
-                max_tokens=500
+                max_tokens=500,
+                response_format={"type": "json_object"},
             )
             
             # Parse response
@@ -250,7 +258,7 @@ Respond with JSON only:
             )
             
         except Exception as e:
-            print(f"⚠️  LLM error: {e}. Using baseline agent.")
+            print(f"WARNING: LLM error: {e}. Using baseline agent.", file=sys.stderr)
             baseline = BaselineAgent()
             return baseline.decide(observation, history)
 
@@ -295,11 +303,12 @@ class EnvironmentClient:
     Can connect to local server or use environment directly.
     """
 
-    def __init__(self, use_server: bool = False, server_url: str = "https://friizy-featureflag.hf.space", task: str = "task1"):
+    def __init__(self, use_server: bool = False, server_url: str = "https://featureflag-featureflag.hf.space", task: str = "task1"):
         self.use_server = use_server
         self.server_url = server_url
         self.env = None
         self.task = task
+        self.headers = self._build_auth_headers()
 
         if not use_server:
             # Use task-specific direct environment when possible
@@ -315,13 +324,65 @@ class EnvironmentClient:
             else:
                 from feature_flag_env.server.feature_flag_environment import FeatureFlagEnvironment
                 self.env = FeatureFlagEnvironment(scenario_config={"task_name": task})
+
+    def _build_auth_headers(self) -> Dict[str, str]:
+        headers: Dict[str, str] = {}
+
+        bearer = os.getenv("INFERENCE_BEARER_TOKEN", "").strip()
+        if bearer:
+            headers["Authorization"] = f"Bearer {bearer}"
+
+        api_key = os.getenv("INFERENCE_API_KEY", "").strip() or os.getenv("API_KEY", "").strip()
+        if api_key:
+            headers["X-API-Key"] = api_key
+
+        return headers
+
+    @staticmethod
+    def _parse_json_response(response):
+        try:
+            return response.json()
+        except Exception as exc:
+            raise RuntimeError(
+                f"Non-JSON response from server ({response.status_code}): {response.text[:300]}"
+            ) from exc
+
+    def _ensure_remote_auth(self) -> None:
+        """Best-effort auth bootstrap for secured server deployments."""
+        if not self.use_server:
+            return
+        if self.headers.get("Authorization"):
+            return
+
+        try:
+            import httpx
+
+            response = httpx.post(
+                f"{self.server_url}/security/token",
+                json={"username": "validator", "hours": 1},
+                timeout=15,
+            )
+            if response.status_code != 200:
+                return
+
+            payload = self._parse_json_response(response)
+            token = payload.get("token")
+            if token:
+                self.headers["Authorization"] = f"Bearer {token}"
+        except Exception:
+            # If bootstrap fails, caller may still succeed on unsecured deployments.
+            return
     
     def reset(self) -> FeatureFlagObservation:
         """Reset environment"""
         if self.use_server:
             import httpx
-            response = httpx.post(f"{self.server_url}/reset")
-            data = response.json()
+            self._ensure_remote_auth()
+            response = httpx.post(f"{self.server_url}/reset", headers=self.headers, timeout=30)
+            response.raise_for_status()
+            data = self._parse_json_response(response)
+            if "observation" not in data:
+                raise RuntimeError(f"Unexpected reset payload: {data}")
             return FeatureFlagObservation(**data["observation"])
         else:
             return self.env.reset()
@@ -330,15 +391,19 @@ class EnvironmentClient:
         """Execute action"""
         if self.use_server:
             import httpx
+            self._ensure_remote_auth()
             response = httpx.post(
                 f"{self.server_url}/step",
                 json={
                     "action_type": action.action_type,
                     "target_percentage": action.target_percentage,
                     "reason": action.reason
-                }
+                },
+                headers=self.headers,
+                timeout=30,
             )
-            data = response.json()
+            response.raise_for_status()
+            data = self._parse_json_response(response)
             obs = FeatureFlagObservation(**data["observation"])
             return obs, data["reward"], data["done"], data["info"]
         else:
@@ -349,8 +414,10 @@ class EnvironmentClient:
         """Get current episode trajectory"""
         if self.use_server:
             import httpx
-            response = httpx.get(f"{self.server_url}/state")
-            return response.json()
+            self._ensure_remote_auth()
+            response = httpx.get(f"{self.server_url}/state", headers=self.headers, timeout=30)
+            response.raise_for_status()
+            return self._parse_json_response(response)
         else:
             return self.env.state().model_dump()
 
@@ -364,6 +431,7 @@ def run_episode(
     task: str = "task1",
     debug: bool = False,
     enable_hitl_audit: bool = False,
+    episode_index: int = 1,
 ) -> Dict[str, Any]:
     """
     Run one episode and return results.
@@ -385,17 +453,8 @@ def run_episode(
     history = []
     hitl_audit_rows: List[Dict[str, str]] = []
     
-    print(f"\nEpisode Started")
-    print(f"   Feature: {obs.feature_name}")
-    print(f"   Initial Rollout: {obs.current_rollout_percentage}%")
-    print(f"   Initial Errors: {obs.error_rate*100:.2f}%")
-    
     step_count = 0
     while not obs.done and step_count < 50:
-        if debug:
-            state_done = env_client.env.state().done if (not env_client.use_server and env_client.env is not None) else None
-            print(f"   [DEBUG] Loop start: step_count={step_count}, obs.done={obs.done}, state.done={state_done}")
-
         # Agent decides action
         action = agent.decide(obs, history)
         
@@ -422,11 +481,20 @@ def run_episode(
                 }
             )
         
-        # Print step summary
-        print(f"   Step {step_count + 1}: {action.action_type} -> {action.target_percentage}%")
-        print(f"      Reward: {reward:+.2f} | Errors: {obs.error_rate*100:.2f}% | Health: {obs.system_health_score:.2f}")
-        if debug:
-            print(f"      [DEBUG] done={done}, info.done_reason={info.get('done_reason', '')}")
+        _emit_structured(
+            "STEP",
+            {
+                "episode": episode_index,
+                "step": step_count + 1,
+                "task": task,
+                "action_type": action.action_type,
+                "target_percentage": round(float(action.target_percentage), 4),
+                "reward": round(float(reward), 6),
+                "error_rate": round(float(obs.error_rate), 6),
+                "health_score": round(float(obs.system_health_score), 6),
+                "done": bool(done),
+            },
+        )
         
         step_count += 1
         
@@ -444,13 +512,6 @@ def run_episode(
     grader = get_grader(task)
     score = grader.grade(trajectory)
     
-    print(f"\nEpisode Complete")
-    print(f"   Steps: {step_count}")
-    print(f"   Total Reward: {total_reward:+.2f}")
-    print(f"   Final Rollout: {obs.current_rollout_percentage}%")
-    print(f"   Final Errors: {obs.error_rate*100:.2f}%")
-    print(f"   Task Score: {score:.3f}")
-
     if enable_hitl_audit:
         _print_hitl_audit_table(hitl_audit_rows)
     
@@ -490,7 +551,12 @@ def main():
     parser.add_argument(
         "--local",
         action="store_true",
-        help="Run direct environment instead of cloud server"
+        help="Run direct environment mode (default behavior)"
+    )
+    parser.add_argument(
+        "--remote",
+        action="store_true",
+        help="Run against server URL instead of local environment"
     )
     parser.add_argument(
         "--debug",
@@ -500,7 +566,7 @@ def main():
     parser.add_argument(
         "--server-url",
         type=str,
-        default="https://friizy-featureflag.hf.space",
+        default="https://featureflag-featureflag.hf.space",
         help="Server URL if using HTTP"
     )
     parser.add_argument(
@@ -551,20 +617,24 @@ def main():
     # Expose task context for simple rule-based policies that do not receive task explicitly.
     os.environ["FF_ACTIVE_TASK"] = args.task
     
-    print("=" * 60)
-    print("FEATURE FLAG AGENT - INFERENCE")
-    print("=" * 60)
-    print(f"   Agent: {args.agent}")
-    print(f"   Episodes: {args.episodes}")
-    print(f"   Task: {args.task}")
-    print(f"   Use Server: {not args.local}")
-    print("=" * 60)
+    use_server = bool(args.remote and not args.local)
+
+    _emit_structured(
+        "START",
+        {
+            "agent": args.agent,
+            "episodes": int(args.episodes),
+            "task": args.task,
+            "mode": "remote" if use_server else "local",
+            "server_url": args.server_url if use_server else "",
+        },
+    )
     
     if args.agent == "rl":
         from agents.rl_agent import RLAgent
         if args.rl_train_mode:
             agent = RLAgent(task=args.task, model_path=args.rl_model, training=True)
-            print("WARNING: RL is running in training mode (exploration enabled)")
+            print("WARNING: RL is running in training mode (exploration enabled)", file=sys.stderr)
         else:
             agent = RLAgent(
                 task=args.task,
@@ -574,7 +644,6 @@ def main():
                 epsilon_min=0.0,
             )
             agent.epsilon = 0.0
-            print("RL is running in evaluation mode (deterministic policy)")
     elif args.agent == "hitl":
         from agents.human_in_loop_agent import HumanInLoopAgent
 
@@ -586,10 +655,7 @@ def main():
             allow_human_prompt=not args.hitl_no_prompt,
         )
         prompt_state = "enabled" if not args.hitl_no_prompt else "disabled"
-        print(
-            "HITL mode enabled "
-            f"(threshold={args.hitl_threshold:.2f}, prompts={prompt_state})"
-        )
+        _ = prompt_state
     elif args.agent == "ensemble":
         from agents.ensemble_agent import EnsembleAgent
 
@@ -601,18 +667,14 @@ def main():
             weights=ensemble_weights,
         )
         weights_view = args.ensemble_weights if args.ensemble_weights else "default"
-        print("Using multi-agent ensemble")
-        print(f"   Voting strategy: {args.ensemble_strategy}")
-        print(f"   Agent weights: {weights_view}")
+        _ = weights_view
     else:
         from agents.factory import get_agent
         agent = get_agent(args.agent)
-
-    print(f"Using {args.agent.upper()} agent")
     
     # Create environment client
     env_client = EnvironmentClient(
-        use_server=not args.local,
+        use_server=use_server,
         server_url=args.server_url,
         task=args.task
     )
@@ -620,10 +682,6 @@ def main():
     # Run episodes
     scores = []
     for i in range(args.episodes):
-        print(f"\n{'=' * 60}")
-        print(f"Episode {i + 1}/{args.episodes}")
-        print("=" * 60)
-        
         if args.agent == "hitl":
             result = run_episode(
                 agent,
@@ -631,9 +689,10 @@ def main():
                 task=args.task,
                 debug=args.debug,
                 enable_hitl_audit=True,
+                episode_index=i + 1,
             )
         else:
-            result = run_episode(agent, env_client, task=args.task, debug=args.debug)
+            result = run_episode(agent, env_client, task=args.task, debug=args.debug, episode_index=i + 1)
         scores.append(result["score"])
 
         if hasattr(agent, "decay_epsilon"):
@@ -643,20 +702,24 @@ def main():
             agent.reset()
             
     # Summary
-    print("\n" + "=" * 60)
-    print("FINAL SUMMARY")
-    print("=" * 60)
-    print(f"   Episodes: {args.episodes}")
-    print(f"   Average Score: {sum(scores) / len(scores):.3f}")
-    print(f"   Min Score: {min(scores):.3f}")
-    print(f"   Max Score: {max(scores):.3f}")
     score_std = statistics.pstdev(scores) if len(scores) > 1 else 0.0
-    print(f"   Score Std Dev: {score_std:.4f}")
-    if max(scores) == min(scores) and args.agent == "rl" and not args.rl_train_mode:
-        print("   Note: Min=Max is expected for deterministic RL when policy is stable.")
+
+    _emit_structured(
+        "END",
+        {
+            "agent": args.agent,
+            "episodes": int(args.episodes),
+            "task": args.task,
+            "mode": "remote" if use_server else "local",
+            "average_score": round(float(sum(scores) / len(scores)), 6),
+            "min_score": round(float(min(scores)), 6),
+            "max_score": round(float(max(scores)), 6),
+            "score_std_dev": round(float(score_std), 6),
+        },
+    )
+
     if args.agent == "ensemble":
         _print_ensemble_stats(agent)
-    print("=" * 60)
     
     return {
         "average_score": sum(scores) / len(scores),

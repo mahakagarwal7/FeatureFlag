@@ -846,7 +846,7 @@ if __name__ == "__main__":
     port = int(os.getenv("ENV_PORT", "8000"))
     reload = os.getenv("ENV_RELOAD", "false").lower() == "true"
 
-    print(f"≡ƒÜÇ Starting Feature Flag Environment Server")
+    print("[INFO] Starting Feature Flag Environment Server")
     print(f"   Host: {host}")
     print(f"   Port: {port}")
     print(f"   Docs: http://localhost:{port}/docs")
@@ -855,12 +855,12 @@ if __name__ == "__main__":
     if SECURITY_AVAILABLE:
         status = get_security_status()
         if security_config.enabled:
-            print(f"   ≡ƒöÆ Security: ENABLED")
+            print("   [OK] Security: ENABLED")
             print(f"      - Authentication: {'ON' if security_config.require_auth else 'OFF'}")
             print(f"      - Rate Limiting: {status['rate_limit_requests']} req/{status['rate_limit_window_seconds']}s")
             print(f"      - Audit Logging: ON")
         else:
-            print(f"   ΓÜ¬ Security: Available but disabled (set ENABLE_SECURITY=true to enable)")
+            print("   [INFO] Security: Available but disabled (set ENABLE_SECURITY=true to enable)")
 
     if MONITORING_AVAILABLE:
         if monitoring_config.enabled:
@@ -871,18 +871,18 @@ if __name__ == "__main__":
             print(f"      - Dashboard: http://localhost:{port}/monitoring/dashboard")
             print(f"      - Prometheus: http://localhost:{port}/metrics")
         else:
-            print(f"   ΓÜ¬ Monitoring: Available but disabled (set ENABLE_MONITORING=true to enable)")
+            print("   [INFO] Monitoring: Available but disabled (set ENABLE_MONITORING=true to enable)")
 
     if DATABASE_AVAILABLE and database:
         db_health = database.get_health()
         if db_health.get("enabled"):
-            print(f"   ≡ƒùä∩╕Å SQLite: ENABLED")
+            print("   [OK] SQLite: ENABLED")
             print(f"      - Path: {db_health.get('path')}")
             print(f"      - Connected: {'YES' if db_health.get('connected') else 'NO'}")
             print(f"      - DB Health: http://localhost:{port}/db/health")
             print(f"      - DB Stats: http://localhost:{port}/db/stats")
         else:
-            print(f"   ΓÜ¬ SQLite: Available but disabled (set ENABLE_DATABASE=true to enable)")
+            print("   [INFO] SQLite: Available but disabled (set ENABLE_DATABASE=true to enable)")
 
     uvicorn.run(
         "feature_flag_env.server.app:app",
