@@ -28,9 +28,7 @@ dependencies = [
     "python-dotenv>=1.0.0",  # For loading .env files
     "pytest>=7.0.0",         # For testing
     "httpx>=0.24.0",         # For async HTTP requests
-
-    # 📦 OpenEnv (required for validation & deployment)
-    "openenv-core>=0.2.0",
+    "openenv-core>=0.2.0",   # For OpenEnv validation/runtime compatibility
 ]
 
 [project.scripts]

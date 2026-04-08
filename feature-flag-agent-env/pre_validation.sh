@@ -3,7 +3,7 @@
 
 set -uo pipefail
 
-DOCKER_BUILD_TIMEOUT="${DOCKER_BUILD_TIMEOUT:-600}"
+DOCKER_BUILD_TIMEOUT="${DOCKER_BUILD_TIMEOUT:-1800}"
 if [ -t 1 ]; then
   RED='\033[0;31m'
   GREEN='\033[0;32m'
@@ -157,16 +157,40 @@ log "${BOLD}Step 1/4: Pinging HF Space${NC} ($PING_URL/reset) ..."
 
 CURL_OUTPUT=$(portable_mktemp "validate-curl")
 CLEANUP_FILES+=("$CURL_OUTPUT")
-HTTP_CODE=$(curl -s -o "$CURL_OUTPUT" -w "%{http_code}" -X POST \
-  -H "Content-Type: application/json" -d '{}' \
-  "$PING_URL/reset" --max-time 30 2>/dev/null || printf "000")
+attempt_reset() {
+  local use_auth="$1"
+  if [ "$use_auth" = "true" ]; then
+    curl -s -o "$CURL_OUTPUT" -w "%{http_code}" -X POST \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer $HF_TOKEN" \
+      -d '{}' "$PING_URL/reset" --max-time 30 2>/dev/null || printf "000"
+  else
+    curl -s -o "$CURL_OUTPUT" -w "%{http_code}" -X POST \
+      -H "Content-Type: application/json" -d '{}' \
+      "$PING_URL/reset" --max-time 30 2>/dev/null || printf "000"
+  fi
+}
 
-if [ "$HTTP_CODE" = "401" ] && [ -n "${HF_TOKEN:-}" ]; then
-  HTTP_CODE=$(curl -s -o "$CURL_OUTPUT" -w "%{http_code}" -X POST \
-    -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $HF_TOKEN" \
-    -d '{}' "$PING_URL/reset" --max-time 30 2>/dev/null || printf "000")
-fi
+HTTP_CODE="000"
+for attempt in 1 2 3; do
+  HTTP_CODE=$(attempt_reset "false")
+  if [ "$HTTP_CODE" = "401" ] && [ -n "${HF_TOKEN:-}" ]; then
+    HTTP_CODE=$(attempt_reset "true")
+  fi
+
+  if [ "$HTTP_CODE" = "200" ]; then
+    break
+  fi
+
+  # Retry transient service unavailable responses.
+  if [ "$HTTP_CODE" = "503" ] && [ "$attempt" -lt 3 ]; then
+    log "  Received HTTP 503, retrying in 10s (attempt $attempt/3) ..."
+    sleep 10
+    continue
+  fi
+
+  break
+done
 
 if [ "$HTTP_CODE" = "200" ]; then
   pass "HF Space is live and responds to /reset"
@@ -179,6 +203,13 @@ else
   fail "HF Space /reset returned HTTP $HTTP_CODE (expected 200)"
   if [ "$HTTP_CODE" = "401" ]; then
     hint "The Space requires authorization. Ensure HF_TOKEN is valid and has access to this Space."
+  elif [ "$HTTP_CODE" = "503" ]; then
+    if grep -qi "space is in error" "$CURL_OUTPUT"; then
+      hint "HF reports the Space is currently in an error state. Open the Space page and restart/fix runtime errors."
+      hint "Space URL: https://huggingface.co/spaces/FeatureFlag/FeatureFlag"
+    else
+      hint "Space may be cold-starting or temporarily unavailable. Wait 1-2 minutes and retry."
+    fi
   fi
   hint "Make sure your Space is running and the URL is correct."
   hint "Try opening $PING_URL in your browser first."
@@ -217,14 +248,24 @@ fi
 
 log "${BOLD}Step 3/4: Running openenv validate${NC} ..."
 
-if ! command -v openenv >/dev/null 2>&1; then
+OPENENV_CMD=""
+if command -v openenv >/dev/null 2>&1; then
+  OPENENV_CMD="openenv"
+elif [ -x "$REPO_DIR/.venv/Scripts/openenv.exe" ]; then
+  OPENENV_CMD="$REPO_DIR/.venv/Scripts/openenv.exe"
+elif [ -x "$PROJECT_DIR/.venv/Scripts/openenv.exe" ]; then
+  OPENENV_CMD="$PROJECT_DIR/.venv/Scripts/openenv.exe"
+elif [ -x "$PROJECT_DIR/../.venv/Scripts/openenv.exe" ]; then
+  OPENENV_CMD="$PROJECT_DIR/../.venv/Scripts/openenv.exe"
+else
   fail "openenv command not found"
   hint "Install it: pip install openenv-core"
+  hint "Or install in venv and use: .venv/Scripts/openenv.exe validate"
   stop_at "Step 3"
 fi
 
 VALIDATE_OK=false
-VALIDATE_OUTPUT=$(cd "$PROJECT_DIR" && openenv validate 2>&1) && VALIDATE_OK=true
+VALIDATE_OUTPUT=$(cd "$PROJECT_DIR" && "$OPENENV_CMD" validate 2>&1) && VALIDATE_OK=true
 
 if [ "$VALIDATE_OK" = true ]; then
   pass "openenv validate passed"

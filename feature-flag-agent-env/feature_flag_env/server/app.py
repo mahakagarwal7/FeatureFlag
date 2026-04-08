@@ -821,7 +821,7 @@ if DATABASE_AVAILABLE:
         return database.get_stats()
 
 
-if __name__ == "__main__":
+def main() -> None:
     """
     Run the server directly with:
     python -m feature_flag_env.server.app
@@ -877,3 +877,7 @@ if __name__ == "__main__":
         port=port,
         reload=reload
     )
+
+
+if __name__ == "__main__":
+    main()
