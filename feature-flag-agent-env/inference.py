@@ -200,11 +200,19 @@ class LLMAgent:
     
     def __init__(self, model: str = ""):
         self.model = model or os.getenv("MODEL_NAME", "gpt-4o-mini")
-        self.api_key = os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY")
+        # Validator injects API_KEY for LiteLLM proxy metering.
+        self.api_key = (
+            os.getenv("API_KEY")
+            or os.getenv("HF_TOKEN")
+            or os.getenv("OPENAI_API_KEY")
+        )
         self.api_base_url = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
         
         if not self.api_key:
-            print("WARNING: HF_TOKEN/OPENAI_API_KEY is not set. Using the baseline agent instead.", file=sys.stderr)
+            print(
+                "WARNING: API_KEY/HF_TOKEN/OPENAI_API_KEY is not set. Using the baseline agent instead.",
+                file=sys.stderr,
+            )
             self.use_baseline = True
         else:
             self.use_baseline = False
@@ -580,7 +588,7 @@ def main():
     parser.add_argument(
         "--agent",
         type=str,
-        default="baseline",
+        default="llm",
         choices=["baseline", "llm", "hybrid", "rl", "hitl", "ensemble"],
         help="Agent type to use"
     )
