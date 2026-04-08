@@ -10,8 +10,8 @@ COPY feature-flag-agent-env/requirements.txt ./requirements.txt
 # Install dependencies securely
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the project files into the container
-COPY . .
+# Copy the project source tree into the container
+COPY feature-flag-agent-env/ ./
 
 # Expose port 7860 as expected by Hugging Face Spaces
 EXPOSE 7860
