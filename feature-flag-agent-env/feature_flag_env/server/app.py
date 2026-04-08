@@ -542,12 +542,6 @@ if SECURITY_AVAILABLE:
         - Checking authentication requirements
         - Enterprise deployment verification
         """
-        if not security_config.enabled:
-            raise HTTPException(
-                status_code=403,
-                detail="Security is not enabled"
-            )
-        
         return get_security_status()
     
     
@@ -567,12 +561,6 @@ if SECURITY_AVAILABLE:
             "hours": 24
         }
         """
-        if not security_config.enabled:
-            raise HTTPException(
-                status_code=403,
-                detail="Security is not enabled"
-            )
-        
         try:
             token = create_token(request.username, request.hours)
             hours = request.hours or security_config.token_expiry_hours
