@@ -31,7 +31,12 @@ class LLMAgent:
     def __init__(self, model: str = ""):
         self.model = model or os.getenv("MODEL_NAME", "gpt-4o-mini")
         self.api_base_url = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
-        self.api_key = os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY")
+        # Hackathon validator injects API_KEY and API_BASE_URL for proxy metering.
+        self.api_key = (
+            os.getenv("API_KEY")
+            or os.getenv("HF_TOKEN")
+            or os.getenv("OPENAI_API_KEY")
+        )
         self.timeout_seconds = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "20"))
         self.max_retries = int(os.getenv("OPENAI_MAX_RETRIES", "2"))
         self.retry_backoff_seconds = float(os.getenv("OPENAI_RETRY_BACKOFF_SECONDS", "1.5"))
@@ -41,7 +46,10 @@ class LLMAgent:
         self.last_error = None
 
         if not self.api_key:
-            print("WARNING: HF_TOKEN/OPENAI_API_KEY not set. Using fallback.", file=sys.stderr)
+            print(
+                "WARNING: API_KEY/HF_TOKEN/OPENAI_API_KEY not set. Using fallback.",
+                file=sys.stderr,
+            )
             self.use_baseline = True
         else:
             self.use_baseline = False
