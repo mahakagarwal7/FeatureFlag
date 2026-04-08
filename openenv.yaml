@@ -1,0 +1,199 @@
+# =============================================================================
+# OPENENV SPECIFICATION (Repository Root)
+# =============================================================================
+# This file tells OpenEnv and judges about your environment.
+# It's REQUIRED for hackathon submission.
+# =============================================================================
+
+# Basic Information
+name: feature-flag-agent-env
+version: 1.0.0
+description: "AI-Powered Intelligent Feature Rollout & Risk Management Simulation"
+author: "Your Name"  # Replace with your name/team name
+
+# =============================================================================
+# ENVIRONMENT CLASS CONFIGURATION
+# =============================================================================
+# This tells OpenEnv which Python class to import for the environment.
+# Format: package.module.ClassName
+# =============================================================================
+
+env_class: "feature_flag_env.server.feature_flag_environment.FeatureFlagEnvironment"
+
+# =============================================================================
+# TYPED MODELS (Pydantic Classes)
+# =============================================================================
+# These define the action, observation, and state structures.
+# OpenEnv uses these for validation and documentation.
+# =============================================================================
+
+action_type: "feature_flag_env.models.FeatureFlagAction"
+observation_type: "feature_flag_env.models.FeatureFlagObservation"
+state_type: "feature_flag_env.models.FeatureFlagState"
+
+# =============================================================================
+# DOCKER CONFIGURATION
+# =============================================================================
+# This tells OpenEnv how to build and run your environment container.
+# =============================================================================
+
+docker:
+  # Base Python image (3.11 is stable and well-supported)
+  base_image: "python:3.11-slim"
+  
+  # Ports to expose (FastAPI runs on 7860 for HF Space)
+  ports:
+    - 7860
+  
+  # Environment variables needed at runtime
+  env:
+    - API_BASE_URL
+    - MODEL_NAME
+    - HF_TOKEN
+    - LOCAL_IMAGE_NAME
+    - ENV_HOST=0.0.0.0
+    - ENV_PORT=7860
+  
+  # Build arguments (optional)
+  build_args:
+    - PIP_NO_CACHE_DIR=1
+  
+  # Health check (verifies server is running)
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:7860/health"]
+    interval: 30s
+    timeout: 10s
+    retries: 3
+    start_period: 40s
+
+# =============================================================================
+# TASKS & GRADERS
+# =============================================================================
+# Define the 3 required tasks with difficulty levels.
+# Each task has a grader that scores from 0.0 to 1.0
+# =============================================================================
+
+tasks:
+  - name: "task1_safe_rollout"
+    description: "Safely rollout a feature from 0% to 25% without exceeding error thresholds"
+    difficulty: "easy"
+    grader: "feature_flag_env.tasks.graders.Task1Grader"
+    max_steps: 10
+    success_criteria:
+      - "Reach 25% rollout"
+      - "Keep error rate < 5%"
+      - "Complete within 10 steps"
+
+  - name: "task2_risk_aware"
+    description: "Scale to 75% rollout while responding to simulated incidents"
+    difficulty: "medium"
+    grader: "feature_flag_env.tasks.graders.Task2Grader"
+    max_steps: 30
+    success_criteria:
+      - "Reach 75% final rollout"
+      - "Detect and respond to incidents"
+      - "Maintain latency < 200ms"
+
+  - name: "task3_multi_objective"
+    description: "Maximize revenue while balancing adoption, risk, and system health over 50 steps"
+    difficulty: "hard"
+    grader: "feature_flag_env.tasks.graders.Task3Grader"
+    max_steps: 50
+    success_criteria:
+      - "Maximize cumulative revenue"
+      - "Maintain system health > 0.7"
+      - "Achieve > 80% adoption"
+      - "Zero catastrophic failures"
+
+# =============================================================================
+# ACTION SPACE
+# =============================================================================
+# Documents what actions the agent can take.
+# =============================================================================
+
+action_space:
+  type: "discrete"
+  actions:
+    - name: "INCREASE_ROLLOUT"
+      description: "Increase deployment percentage"
+    - name: "DECREASE_ROLLOUT"
+      description: "Decrease deployment percentage"
+    - name: "MAINTAIN"
+      description: "Keep current percentage"
+    - name: "HALT_ROLLOUT"
+      description: "Pause rollout temporarily"
+    - name: "FULL_ROLLOUT"
+      description: "Deploy to 100% immediately"
+    - name: "ROLLBACK"
+      description: "Emergency revert to 0%"
+
+# =============================================================================
+# OBSERVATION SPACE
+# =============================================================================
+# Documents what the agent observes at each step.
+# =============================================================================
+
+observation_space:
+  type: "dict"
+  fields:
+    - name: "current_rollout_percentage"
+      type: "float"
+      range: [0.0, 100.0]
+      description: "Current feature rollout percentage"
+    
+    - name: "error_rate"
+      type: "float"
+      range: [0.0, 1.0]
+      description: "Current error rate (0.0 = 0%, 1.0 = 100%)"
+    
+    - name: "latency_p99_ms"
+      type: "float"
+      range: [0.0, null]
+      description: "99th percentile latency in milliseconds"
+    
+    - name: "user_adoption_rate"
+      type: "float"
+      range: [0.0, 1.0]
+      description: "Percentage of users who adopted the feature"
+    
+    - name: "revenue_impact"
+      type: "float"
+      range: [0.0, null]
+      description: "Revenue generated in dollars"
+    
+    - name: "system_health_score"
+      type: "float"
+      range: [0.0, 1.0]
+      description: "Composite health score (1.0 = perfect)"
+    
+    - name: "active_users"
+      type: "int"
+      range: [0, null]
+      description: "Number of active users using the feature"
+    
+    - name: "feature_name"
+      type: "string"
+      description: "Name of the feature being rolled out"
+    
+    - name: "time_step"
+      type: "int"
+      range: [0, null]
+      description: "Current step number in the episode"
+
+# =============================================================================
+# METADATA & TAGS
+# =============================================================================
+# Helps judges categorize and discover your environment.
+# =============================================================================
+
+tags:
+  - "infrastructure"
+  - "risk-management"
+  - "progressive-delivery"
+  - "feature-flags"
+  - "real-world"
+  - "llm-agent"
+  - "reinforcement-learning"
+
+category: "infrastructure"
+license: "MIT"
