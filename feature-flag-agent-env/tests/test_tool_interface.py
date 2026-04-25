@@ -40,7 +40,6 @@ def test_mock_github_tool():
 
     print(f"   📊 Deployment status: {result.data['status']}")
     print("   ✅ Passed")
-    return True
 
 
 def test_mock_datadog_tool():
@@ -62,7 +61,6 @@ def test_mock_datadog_tool():
     print(f"   📊 Error rate: {result.data['latest_value']:.4f}")
     print(f"   📊 Latency: {result2.data['latest_value']:.1f}ms")
     print("   ✅ Passed")
-    return True
 
 
 def test_mock_slack_tool():
@@ -86,7 +84,6 @@ def test_mock_slack_tool():
 
     print(f"   📊 Messages logged: {len(tool.message_log)}")
     print("   ✅ Passed")
-    return True
 
 
 # ===========================================================================
@@ -103,7 +100,6 @@ def test_validation_unknown_action():
 
     print(f"   📊 Error: {result.error}")
     print("   ✅ Passed")
-    return True
 
 
 def test_validation_missing_params():
@@ -121,7 +117,6 @@ def test_validation_missing_params():
     assert "channel" in result.error
 
     print("   ✅ Passed")
-    return True
 
 
 def test_rate_limiting():
@@ -141,7 +136,6 @@ def test_rate_limiting():
 
     print(f"   📊 Calls made: {tool.call_count}")
     print("   ✅ Passed")
-    return True
 
 
 def test_metrics_tracking():
@@ -162,7 +156,6 @@ def test_metrics_tracking():
 
     print(f"   📊 Metrics: {metrics}")
     print("   ✅ Passed")
-    return True
 
 
 # ===========================================================================
@@ -191,7 +184,6 @@ def test_tool_manager_register():
 
     print(f"   📊 Connected tools: {manager.tool_names}")
     print("   ✅ Passed")
-    return True
 
 
 def test_tool_manager_unknown_tool():
@@ -209,7 +201,6 @@ def test_tool_manager_unknown_tool():
 
     print(f"   📊 Error: {result.error}")
     print("   ✅ Passed")
-    return True
 
 
 def test_tool_memory():
@@ -233,7 +224,6 @@ def test_tool_memory():
 
     print(f"   📊 Buffer size: {len(manager.memory.recent)}")
     print("   ✅ Passed")
-    return True
 
 
 def test_tool_manager_reset():
@@ -254,7 +244,6 @@ def test_tool_manager_reset():
     assert manager.memory.last is None
 
     print("   ✅ Passed")
-    return True
 
 
 # ===========================================================================
@@ -287,7 +276,6 @@ def test_env_tool_call_action():
     print(f"   📊 Tool result: {response.observation.last_tool_result['action']}")
     print(f"   📊 Reward: {response.reward:+.2f}")
     print("   ✅ Passed")
-    return True
 
 
 def test_env_tool_call_prompt_string():
@@ -314,7 +302,6 @@ def test_env_tool_call_prompt_string():
 
     print(f"   📊 Prompt length: {len(prompt)} chars")
     print("   ✅ Passed")
-    return True
 
 
 def test_env_mixed_actions():
@@ -346,7 +333,6 @@ def test_env_mixed_actions():
 
     print(f"   📊 Rollout: 0 → 10 → 10 (tool) → 20")
     print("   ✅ Passed")
-    return True
 
 
 def test_env_tools_disabled():
@@ -365,7 +351,6 @@ def test_env_tools_disabled():
 
     print(f"   📊 Penalty reward: {response.reward:+.2f}")
     print("   ✅ Passed")
-    return True
 
 
 def test_env_tool_call_invalid():
@@ -385,7 +370,6 @@ def test_env_tool_call_invalid():
 
     print(f"   📊 Error: {response.observation.last_tool_result['error']}")
     print("   ✅ Passed")
-    return True
 
 
 # ===========================================================================
@@ -409,7 +393,6 @@ def test_backward_compat():
     assert response.observation.current_rollout_percentage == 15.0
 
     print("   ✅ Passed")
-    return True
 
 
 # ===========================================================================
