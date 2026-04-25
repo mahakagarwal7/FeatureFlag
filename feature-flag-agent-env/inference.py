@@ -589,7 +589,7 @@ def main():
         "--agent",
         type=str,
         default="llm",
-        choices=["baseline", "llm", "hybrid", "rl", "hitl", "ensemble"],
+        choices=["baseline", "llm", "hybrid", "rl", "hitl", "ensemble", "master"],
         help="Agent type to use"
     )
     parser.add_argument(

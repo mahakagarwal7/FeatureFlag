@@ -29,6 +29,11 @@ dependencies = [
     "pytest>=7.0.0",         # For testing
     "httpx>=0.24.0",         # For async HTTP requests
     "openenv-core>=0.2.0",   # For OpenEnv validation/runtime compatibility
+    "PyGithub>=1.60.0",      # GitHub integration
+    "datadog-api-client>=2.0.0", # Datadog integration
+    "slack_sdk>=3.20.0",     # Slack integration
+    "PyJWT>=2.8.0",          # JWT support
+    "prometheus-client>=0.19.0", # Monitoring
 ]
 
 [project.scripts]
