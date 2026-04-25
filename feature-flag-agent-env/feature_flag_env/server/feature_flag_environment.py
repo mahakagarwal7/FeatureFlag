@@ -4,7 +4,7 @@ feature_flag_env/server/feature_flag_environment.py
 Main Environment Class (OpenEnv Compliant)
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from feature_flag_env.models import (
     FeatureFlagAction,
     FeatureFlagObservation,
@@ -18,12 +18,22 @@ from feature_flag_env.utils.reward_functions import (
     calculate_reward_task2,
     calculate_reward_task3,
 )
+from feature_flag_env.utils.extended_rewards import calculate_extended_reward
+from feature_flag_env.stakeholders import StakeholderPanel, StakeholderRole
+from feature_flag_env.missions import MissionTracker, get_mission
+from feature_flag_env.tools.tool_manager import ToolManager
+from feature_flag_env.tools.tool_interface import ToolCallRequest
+from feature_flag_env.tools.mock_adapters import MockGitHubTool, MockDatadogTool, MockSlackTool
 import uuid
 import random
 
 
 class FeatureFlagEnvironment:
-    def __init__(self, scenario_config: Optional[Dict[str, Any]] = None):
+    def __init__(self, scenario_config: Optional[Dict[str, Any]] = None,
+                 stakeholders_enabled: bool = False,
+                 mission_config: Optional[str] = None,
+                 tools_enabled: bool = False,
+                 tool_manager: Optional[ToolManager] = None):
         self.scenario_library = {
             "stable": {
                 "name": "stable_feature",
@@ -68,6 +78,17 @@ class FeatureFlagEnvironment:
         self.previous_observation: Optional[FeatureFlagObservation] = None
         self.scenario_config = scenario_config
 
+        # --- Extended features ---
+        self.stakeholders_enabled = stakeholders_enabled
+        self._stakeholder_panel: Optional[StakeholderPanel] = None
+
+        self.mission_config = mission_config  # mission name string
+        self._mission_tracker: Optional[MissionTracker] = None
+
+        # --- Tool integration ---
+        self.tools_enabled = tools_enabled
+        self._tool_manager: Optional[ToolManager] = tool_manager
+
    
     def reset(self) -> FeatureFlagObservation:
         if self.scenario_config:
@@ -86,6 +107,11 @@ class FeatureFlagEnvironment:
             else:
                 config = self.scenario_config
                 scenario_name = config.get("name", "custom")
+        elif self.mission_config:
+            # Mission mode: use the mission's scenario
+            mission = get_mission(self.mission_config)
+            scenario_name = mission.scenario_name
+            config = self.scenario_library.get(scenario_name, self.scenario_library["stable"])
         else:
             scenario_name = random.choice(list(self.scenario_library.keys()))
             config = self.scenario_library[scenario_name]
@@ -93,15 +119,21 @@ class FeatureFlagEnvironment:
         seed = random.randint(0, 10000)
         self.simulator = FeatureFlagSimulator(config, seed=seed)
 
-       
-        self._state = FeatureFlagState(
-            episode_id=str(uuid.uuid4()),
-            step_count=0,
-            max_steps={
+        # Determine max_steps: mission total or difficulty-based
+        if self.mission_config:
+            mission = get_mission(self.mission_config)
+            max_steps = mission.total_max_steps()
+        else:
+            max_steps = {
                 "easy": 10,
                 "medium": 30,
                 "hard": 50,
-            }.get(self._get_difficulty(scenario_name), 50),
+            }.get(self._get_difficulty(scenario_name), 50)
+
+        self._state = FeatureFlagState(
+            episode_id=str(uuid.uuid4()),
+            step_count=0,
+            max_steps=max_steps,
             total_reward=0.0,
             rollout_history=[],
             action_history=[],
@@ -109,6 +141,25 @@ class FeatureFlagEnvironment:
             scenario_name=scenario_name,
             difficulty=self._get_difficulty(scenario_name),
         )
+
+        # --- Initialize extended features ---
+        if self.stakeholders_enabled:
+            self._stakeholder_panel = StakeholderPanel()
+            self._stakeholder_panel.reset()
+
+        if self.mission_config:
+            mission = get_mission(self.mission_config)
+            self._mission_tracker = MissionTracker(mission)
+            self._mission_tracker.reset()
+
+        # --- Initialize tool manager ---
+        if self.tools_enabled:
+            if self._tool_manager is None:
+                self._tool_manager = ToolManager()
+                self._tool_manager.register(MockGitHubTool())
+                self._tool_manager.register(MockDatadogTool())
+                self._tool_manager.register(MockSlackTool())
+            self._tool_manager.reset()
 
         initial_metrics = self.simulator.step(target_rollout=0.0)
 
@@ -126,17 +177,27 @@ class FeatureFlagEnvironment:
             done=False,
         )
 
+        # Populate extended observation fields at reset
+        observation = self._populate_extended_obs(observation)
+
         self.previous_observation = observation
         return observation
 
     
     def step(self, action: FeatureFlagAction) -> StepResponse:
-        if not 0.0 <= action.target_percentage <= 100.0:
+        if action.action_type != "TOOL_CALL" and not 0.0 <= action.target_percentage <= 100.0:
             raise ValueError("target_percentage must be between 0 and 100")
 
        
         if self._state is None or self._state.done:
             raise ValueError("Episode done. Call reset()")
+
+        if self.simulator is None:
+            raise ValueError("Simulator not initialized. Call reset()")
+
+        # --- Handle TOOL_CALL action type ---
+        if action.action_type == "TOOL_CALL":
+            return self._handle_tool_call(action)
 
         if self.simulator is None:
             raise ValueError("Simulator not initialized. Call reset()")
@@ -162,23 +223,78 @@ class FeatureFlagEnvironment:
             done=False,
         )
 
-        
-        reward = calculate_reward(old_obs, observation, action)
-        # Task-aligned reward:
-        # The graders evaluate task-specific objectives, so the training reward should
-        # be consistent with the task difficulty of the chosen scenario.
-        if self._state.difficulty == "easy":
-            reward = calculate_reward_task1(old_obs, observation, action)
-        elif self._state.difficulty == "medium":
-            reward = calculate_reward_task2(old_obs, observation, action)
-        elif self._state.difficulty == "hard":
-            reward = calculate_reward_task3(old_obs, observation, action)
-        
+        # --- Collect stakeholder feedback ---
+        stakeholder_sentiments = {}
+        phase_advanced = False
+        phase_progress_value = 0.0
+        phase_reward_weight = 1.0
+
+        if self._stakeholder_panel is not None:
+            feedbacks = self._stakeholder_panel.get_all_feedback(observation)
+            stakeholder_sentiments = {
+                role.value: self._stakeholder_panel.__dict__[role.value].satisfaction
+                for role in StakeholderRole
+            }
+
+        # --- Advance mission phase ---
+        if self._mission_tracker is not None:
+            approval = (
+                self._stakeholder_panel.overall_approval
+                if self._stakeholder_panel else True
+            )
+            mission_result = self._mission_tracker.step(
+                rollout_pct=action.target_percentage,
+                error_rate=observation.error_rate,
+                stakeholder_approval=approval,
+            )
+            phase_advanced = mission_result["phase_advanced"]
+            phase_progress_value = self._mission_tracker.phase_progress
+            current_phase = self._mission_tracker.current_phase
+            phase_reward_weight = current_phase.reward_weight if current_phase else 1.0
+
+        # --- Populate extended observation fields ---
+        observation = self._populate_extended_obs(observation)
+
+        # --- Calculate reward ---
+        use_extended = bool(stakeholder_sentiments or self._mission_tracker)
+
+        if use_extended:
+            # Pick base reward function based on difficulty
+            base_fn = calculate_reward
+            if self._state.difficulty == "easy":
+                base_fn = calculate_reward_task1
+            elif self._state.difficulty == "medium":
+                base_fn = calculate_reward_task2
+            elif self._state.difficulty == "hard":
+                base_fn = calculate_reward_task3
+
+            reward = calculate_extended_reward(
+                old_obs, observation, action,
+                stakeholder_sentiments=stakeholder_sentiments,
+                phase_advanced=phase_advanced,
+                phase_progress_value=phase_progress_value,
+                phase_reward_weight=phase_reward_weight,
+                base_reward_fn=base_fn,
+            )
+        else:
+            # Original reward path — unchanged
+            reward = calculate_reward(old_obs, observation, action)
+            if self._state.difficulty == "easy":
+                reward = calculate_reward_task1(old_obs, observation, action)
+            elif self._state.difficulty == "medium":
+                reward = calculate_reward_task2(old_obs, observation, action)
+            elif self._state.difficulty == "hard":
+                reward = calculate_reward_task3(old_obs, observation, action)
+
        
         self._state.total_reward += reward
 
        
         done = self._check_done(observation, action)
+
+        # Mission completion also triggers done
+        if self._mission_tracker and self._mission_tracker.is_mission_complete:
+            done = True
 
         # Task1 terminal shaping: penalize ending below minimum acceptable rollout.
         if done and self._state.difficulty == "easy" and observation.current_rollout_percentage < 23.0:
@@ -190,17 +306,28 @@ class FeatureFlagEnvironment:
 
         self.previous_observation = observation
 
+        info = {
+            "scenario_name": self._state.scenario_name,
+            "difficulty": self._state.difficulty,
+            "step_count": self._state.step_count,
+            "total_reward": self._state.total_reward,
+            "done_reason": self._get_done_reason(observation, action) if done else "",
+        }
+
+        # Add extended info
+        if self._mission_tracker:
+            info["mission"] = self._mission_tracker.to_info_dict()
+            info["phase_advanced"] = phase_advanced
+
+        if self._stakeholder_panel:
+            info["stakeholder_approval"] = self._stakeholder_panel.overall_approval
+            info["stakeholder_avg_sentiment"] = self._stakeholder_panel.average_sentiment
+
         return StepResponse(
             observation=observation,
             reward=reward,
             done=done,
-            info={
-                "scenario_name": self._state.scenario_name,
-                "difficulty": self._state.difficulty,
-                "step_count": self._state.step_count,
-                "total_reward": self._state.total_reward,
-                "done_reason": self._get_done_reason(observation, action) if done else "",
-            },
+            info=info,
         )
 
    
@@ -242,9 +369,156 @@ class FeatureFlagEnvironment:
             return "catastrophic_error_rate"
         if action.target_percentage >= 100.0:
             return "full_rollout_requested"
+        if self._mission_tracker and self._mission_tracker.is_mission_complete:
+            return "mission_complete"
         return "task_or_env_condition"
 
+    # --- Extended helpers ---------------------------------------------------
+
+    def _populate_extended_obs(
+        self, observation: FeatureFlagObservation
+    ) -> FeatureFlagObservation:
+        """Fill in stakeholder/mission/tool fields when features are enabled."""
+        if self._stakeholder_panel is not None:
+            # Old fields mapping for backward compatibility
+            observation.stakeholder_devops_sentiment = (
+                self._stakeholder_panel.devops.satisfaction * 2 - 1  # map [0,1]→[-1,1]
+            )
+            observation.stakeholder_product_sentiment = (
+                self._stakeholder_panel.product.satisfaction * 2 - 1
+            )
+            observation.stakeholder_customer_sentiment = (
+                self._stakeholder_panel.customer_success.satisfaction * 2 - 1
+            )
+            observation.stakeholder_overall_approval = (
+                self._stakeholder_panel.overall_approval
+            )
+
+            # Generate new structured FeedbackVector
+            fv = self._stakeholder_panel.get_feedback_vector(observation)
+            observation.stakeholder_feedback_dict = {
+                "devops_score": fv.devops_score,
+                "product_score": fv.product_score,
+                "customer_score": fv.customer_score,
+                "devops_message": fv.devops_message,
+                "product_message": fv.product_message,
+                "customer_message": fv.customer_message,
+                "consensus_score": fv.consensus_score,
+                "conflict_level": fv.conflict_level,
+                "majority_approval": fv.majority_approval,
+                "all_concerns": fv.all_concerns,
+            }
+            
+            # Extract belief tracking
+            if self._stakeholder_panel.belief_tracker is not None:
+                observation.stakeholder_belief_dict = self._stakeholder_panel.belief_tracker.summary()
+
+        if self._mission_tracker is not None:
+            info = self._mission_tracker.to_info_dict()
+            observation.mission_name = info["mission_name"]
+            observation.current_phase = info["current_phase"]
+            observation.phase_index = info["phase_index"]
+            observation.phase_progress = info["phase_progress"]
+            observation.phases_completed = info["phases_completed"]
+            observation.total_phases = info["total_phases"]
+
+        return observation
+
+    def _handle_tool_call(self, action: FeatureFlagAction) -> StepResponse:
+        """Handle TOOL_CALL action — dispatches to ToolManager, no rollout change."""
+        old_obs = self.previous_observation
+
+        # Count the step
+        self._state.add_step(action, reward=0.0)
+
+        # Dispatch tool call
+        tool_result_data = None
+        tool_reward_bonus = 0.0
+
+        if self._tool_manager is not None and action.tool_call is not None:
+            # Propagate env state to mock tools
+            self._tool_manager.update_env_state({
+                "error_rate": old_obs.error_rate,
+                "latency_p99_ms": old_obs.latency_p99_ms,
+                "rollout_percentage": old_obs.current_rollout_percentage,
+                "system_health_score": old_obs.system_health_score,
+                "active_users": old_obs.active_users,
+            })
+
+            request = ToolCallRequest(
+                tool_name=action.tool_call.get("tool_name", ""),
+                action_name=action.tool_call.get("action_name", ""),
+                params=action.tool_call.get("params", {}),
+            )
+            result = self._tool_manager.execute(request)
+            tool_result_data = self._tool_manager.get_last_result_dict()
+
+            # Small reward for successful tool use
+            if result.success:
+                tool_reward_bonus = 0.05
+            else:
+                tool_reward_bonus = -0.02
+        else:
+            tool_reward_bonus = -0.05  # penalty for invalid tool call
+
+        # Observation stays unchanged (no new simulator step — rollout frozen)
+        observation = FeatureFlagObservation(
+            current_rollout_percentage=old_obs.current_rollout_percentage,
+            error_rate=old_obs.error_rate,
+            latency_p99_ms=old_obs.latency_p99_ms,
+            user_adoption_rate=old_obs.user_adoption_rate,
+            revenue_impact=old_obs.revenue_impact,
+            system_health_score=old_obs.system_health_score,
+            active_users=old_obs.active_users,
+            feature_name=old_obs.feature_name,
+            time_step=self._state.step_count,
+            reward=tool_reward_bonus,
+            done=False,
+        )
+
+        # Populate extended fields including tool results
+        observation = self._populate_extended_obs(observation)
+        if tool_result_data:
+            observation.last_tool_result = tool_result_data
+        if self._tool_manager:
+            observation.tool_memory_summary = self._tool_manager.memory.summary()
+
+        self._state.total_reward += tool_reward_bonus
+
+        done = self._check_done(observation, action)
+        self._state.done = done
+        observation.done = done
+
+        self.previous_observation = observation
+
+        info = {
+            "scenario_name": self._state.scenario_name,
+            "difficulty": self._state.difficulty,
+            "step_count": self._state.step_count,
+            "total_reward": self._state.total_reward,
+            "done_reason": self._get_done_reason(observation, action) if done else "",
+            "tool_call_result": tool_result_data,
+        }
+
+        return StepResponse(
+            observation=observation,
+            reward=tool_reward_bonus,
+            done=done,
+            info=info,
+        )
 
 
-def make_environment(scenario_config: Optional[Dict[str, Any]] = None):
-    return FeatureFlagEnvironment(scenario_config)
+def make_environment(
+    scenario_config: Optional[Dict[str, Any]] = None,
+    stakeholders_enabled: bool = False,
+    mission_config: Optional[str] = None,
+    tools_enabled: bool = False,
+    tool_manager: Optional[ToolManager] = None,
+):
+    return FeatureFlagEnvironment(
+        scenario_config,
+        stakeholders_enabled=stakeholders_enabled,
+        mission_config=mission_config,
+        tools_enabled=tools_enabled,
+        tool_manager=tool_manager,
+    )

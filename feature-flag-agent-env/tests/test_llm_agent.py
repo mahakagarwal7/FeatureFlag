@@ -70,7 +70,7 @@ def test_resolve_target_percentage_defaults_for_actions():
 
 
 def test_decide_falls_back_to_baseline_when_no_api_key(monkeypatch):
-    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     agent = LLMAgent()
     assert agent.use_baseline
 
@@ -82,7 +82,7 @@ def test_decide_falls_back_to_baseline_when_no_api_key(monkeypatch):
     assert action.target_percentage == 30.0
 
 
-def test_decide_uses_groq_client_with_mocked_response(monkeypatch):
+def test_decide_uses_openai_client_with_mocked_response(monkeypatch):
     dummy_response = SimpleNamespace(
         choices=[
             SimpleNamespace(
@@ -106,17 +106,15 @@ def test_decide_uses_groq_client_with_mocked_response(monkeypatch):
             })
             return dummy_response
 
-    class FakeGroq:
-        def __init__(self, api_key, timeout):
-            self.api_key = api_key
-            self.timeout = timeout
+    class FakeOpenAI:
+        def __init__(self, api_key, base_url=None, timeout=None):
             self.chat = SimpleNamespace(completions=FakeCompletions())
 
-    fake_groq_module = SimpleNamespace(Groq=FakeGroq)
-    monkeypatch.setenv("GROQ_API_KEY", "test-key")
-    monkeypatch.setenv("GROQ_TIMEOUT_SECONDS", "10")
+    fake_openai_module = SimpleNamespace(OpenAI=FakeOpenAI)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_TIMEOUT_SECONDS", "10")
     monkeypatch.syspath_prepend(os.path.dirname(__file__))
-    sys.modules["groq"] = fake_groq_module
+    sys.modules["openai"] = fake_openai_module
 
     agent = LLMAgent(model="test-model")
     assert not agent.use_baseline
@@ -132,19 +130,19 @@ def test_decide_uses_groq_client_with_mocked_response(monkeypatch):
     assert agent.api_failures == 0
 
 
-def test_decide_with_real_groq_api():
-    api_key = os.getenv("GROQ_API_KEY")
+def test_decide_with_real_openai_api():
+    api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        pytest.skip("GROQ_API_KEY not set in environment")
+        pytest.skip("OPENAI_API_KEY not set in environment")
 
     try:
-        import groq  # noqa: F401
+        import openai  # noqa: F401
     except ImportError:
-        pytest.skip("groq package is not installed")
+        pytest.skip("openai package is not installed")
 
     agent = LLMAgent()
     if agent.use_baseline:
-        pytest.skip("LLMAgent is using baseline fallback despite GROQ_API_KEY")
+        pytest.skip("LLMAgent is using baseline fallback despite OPENAI_API_KEY")
 
     obs = make_observation(current_rollout_percentage=40.0, error_rate=0.02)
     action = agent.decide(obs, history=[])
@@ -163,19 +161,19 @@ def test_decide_with_real_groq_api():
     assert agent.api_calls >= 1
 
 
-def test_decide_with_real_groq_api_multiple_calls():
-    api_key = os.getenv("GROQ_API_KEY")
+def test_decide_with_real_openai_api_multiple_calls():
+    api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        pytest.skip("GROQ_API_KEY not set in environment")
+        pytest.skip("OPENAI_API_KEY not set in environment")
 
     try:
-        import groq  # noqa: F401
+        import openai  # noqa: F401
     except ImportError:
-        pytest.skip("groq package is not installed")
+        pytest.skip("openai package is not installed")
 
     agent = LLMAgent()
     if agent.use_baseline:
-        pytest.skip("LLMAgent is using baseline fallback despite GROQ_API_KEY")
+        pytest.skip("LLMAgent is using baseline fallback despite OPENAI_API_KEY")
 
     for idx in range(5):
         obs = make_observation(
@@ -201,14 +199,14 @@ def test_decide_recovery_on_api_error(monkeypatch):
         def create(self, *args, **kwargs):
             raise RuntimeError("API failed")
 
-    class ErrorGroq:
-        def __init__(self, api_key, timeout):
+    class ErrorOpenAI:
+        def __init__(self, api_key, base_url=None, timeout=None):
             self.chat = SimpleNamespace(completions=ErrorCompletions())
 
-    fake_groq_module = SimpleNamespace(Groq=ErrorGroq)
-    monkeypatch.setenv("GROQ_API_KEY", "test-key")
-    monkeypatch.setenv("GROQ_TIMEOUT_SECONDS", "10")
-    sys.modules["groq"] = fake_groq_module
+    fake_openai_module = SimpleNamespace(OpenAI=ErrorOpenAI)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_TIMEOUT_SECONDS", "10")
+    sys.modules["openai"] = fake_openai_module
 
     agent = LLMAgent()
     obs = make_observation(error_rate=0.20, current_rollout_percentage=60.0)
