@@ -127,6 +127,9 @@ class FeatureFlagObservation(BaseModel):
     approval_status: str = Field(
         default="NONE", description="HITL Approval status: NONE, PENDING, APPROVED, REJECTED"
     )
+    extra_context: Dict[str, Any] = Field(
+        default_factory=dict, description="Metadata from side-cars (patterns, anomalies, etc.)"
+    )
 
     def to_prompt_string(self) -> str:
         """
@@ -163,9 +166,9 @@ Maximize rollout and revenue while keeping:
         if self.mission_name is not None:
             po = "- " + "\n- ".join(self.phase_objectives or []) if self.phase_objectives is not None else "None"
             pa = ", ".join(self.phase_allowed_actions or []) if self.phase_allowed_actions is not None else "All"
-            _idx = self.phase_index if self.phase_index is not None else 0
-            _total = self.total_phases if self.total_phases is not None else 1
-            _progress = self.phase_progress if self.phase_progress is not None else 0.0
+            _idx = int(self.phase_index or 0)
+            _total = int(self.total_phases or 1)
+            _progress = float(self.phase_progress or 0.0)
             parts.append(f"""
 MISSION & PHASE:
 - Mission: {self.mission_name} (Phase {_idx + 1}/{_total}: {self.current_phase})
@@ -179,10 +182,10 @@ MISSION & PHASE:
         if sf is not None:
             parts.append(f"""
 STAKEHOLDER FEEDBACK VECTOR:
-- DevOps Sentiment:  {sf.get('devops_score', 0.0):+.2f} — {str(sf.get('devops_message', ''))}
-- Product Sentiment: {sf.get('product_score', 0.0):+.2f} — {str(sf.get('product_message', ''))}
-- Customer Success:  {sf.get('customer_score', 0.0):+.2f} — {str(sf.get('customer_message', ''))}
-- Consensus Score:   {sf.get('consensus_score', 0.0):+.2f}  |  Conflict Level: {float(sf.get('conflict_level', 0.0)):.2f}
+- DevOps Sentiment:  {float(sf.get('devops_score', 0.0)):+.2f} — {str(sf.get('devops_message', ''))}
+- Product Sentiment: {float(sf.get('product_score', 0.0)):+.2f} — {str(sf.get('product_message', ''))}
+- Customer Success:  {float(sf.get('customer_score', 0.0)):+.2f} — {str(sf.get('customer_message', ''))}
+- Consensus Score:   {float(sf.get('consensus_score', 0.0)):+.2f}  |  Conflict Level: {float(sf.get('conflict_level', 0.0)):.2f}
 - Majority Approval: {'YES' if sf.get('majority_approval') else 'NO'}
 - Priority Concerns: {'; '.join(sf.get('all_concerns', [])) if sf.get('all_concerns') else 'None'}
 """)
@@ -202,14 +205,17 @@ STAKEHOLDER FEEDBACK:
 
         if self.stakeholder_belief_dict is not None:
             bd = self.stakeholder_belief_dict
-            trends = bd.get('satisfaction_trends', {})
+            trends = bd.get('satisfaction_trends', {}) if bd else {}
             _dt = trends.get('devops', 'stable')
             _pt = trends.get('product', 'stable')
             _ct = trends.get('customer_success', 'stable')
+            _st_tracked = int(bd.get('steps_tracked', 0)) if bd else 0
+            _conf_trend = str(bd.get('conflict_trend', 'stable')) if bd else 'stable'
+            _lat_conf = float(bd.get('latest_conflict', 0.0)) if bd else 0.0
             parts.append(f"""
-BELIEF & TRENDS (Last {bd.get('steps_tracked', 0)} steps):
+BELIEF & TRENDS (Last {_st_tracked} steps):
 - Satisfaction Trends: DevOps ({_dt}), Product ({_pt}), Customer ({_ct})
-- Conflict Trend: {bd.get('conflict_trend', 'stable')} (Latest: {bd.get('latest_conflict', 0.0):.2f})
+- Conflict Trend: {_conf_trend} (Latest: {_lat_conf:.2f})
 """)
 
         if self.mission_name is not None:
@@ -235,20 +241,26 @@ TOOL STATUS:
             tr = self.last_tool_result
             _status = "SUCCESS" if tr.get("success") else "FAILED"
             _err = f" ({tr.get('error')})" if tr.get("error") else ""
+            _tool = str(tr.get('tool', 'N/A'))
+            _act = str(tr.get('action', 'N/A'))
+            _lat = float(tr.get('latency_ms', 0))
             parts.append(f"""
 LAST TOOL RESULT:
-- Tool: {tr.get('tool', 'N/A')}.{tr.get('action', 'N/A')}
+- Tool: {_tool}.{_act}
 - Status: {_status}{_err}
-- Latency: {tr.get('latency_ms', 0):.0f}ms
+- Latency: {_lat:.0f}ms
 """)
 
         if self.chaos_incident:
             ci = self.chaos_incident
+            ci_type = str(ci.get('type', 'Unknown'))
+            ci_intensity = float(ci.get('intensity', 0.0))
+            ci_duration = int(ci.get('duration', 0))
             parts.append(f"""
 CHAOS INCIDENT ACTIVE:
-- Type: {ci.get('type')}
-- Intensity: {ci.get('intensity', 0):.2f}
-- Time Remaining: {ci.get('duration')} steps
+- Type: {ci_type}
+- Intensity: {ci_intensity:.2f}
+- Time Remaining: {ci_duration} steps
 """)
 
         if self.approval_status != "NONE":
@@ -298,14 +310,19 @@ CHAOS INCIDENT ACTIVE:
         vector[13] = _clip((self.tools_connected or 0) / 10.0, 0.0, 1.0)
         vector[14] = _clip((self.tools_alerts_active or 0) / 5.0, 0.0, 1.0)
         
-        tr = self.last_tool_result or {}
-        vector[15] = 1.0 if tr.get("success") else 0.0
-        vector[16] = _clip(tr.get("latency_ms", 0) / 2000.0, 0.0, 1.0)
+        tr_val = self.last_tool_result
+        if tr_val is None:
+            tr_val = {}
+        vector[15] = 1.0 if tr_val.get("success") else 0.0
+        vector[16] = _clip(float(tr_val.get("latency_ms", 0)) / 2000.0, 0.0, 1.0)
 
         # Chaos & HITL (17-18)
         vector = np.concatenate([vector, np.zeros(2, dtype=np.float32)])
         if self.chaos_incident:
-            vector[17] = _clip(self.chaos_incident.get("intensity", 0.0), 0.0, 1.0)
+            ci_val = self.chaos_incident
+            if ci_val is None:
+                ci_val = {}
+            vector[17] = _clip(float(ci_val.get("intensity", 0.0)), 0.0, 1.0)
         
         status_map = {"NONE": 0.0, "PENDING": 0.3, "APPROVED": 1.0, "REJECTED": -0.5}
         vector[18] = status_map.get(self.approval_status, 0.0)

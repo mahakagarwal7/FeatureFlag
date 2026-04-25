@@ -26,6 +26,7 @@ from feature_flag_env.tools.tool_interface import ToolCallRequest
 from feature_flag_env.tools.mock_adapters import MockGitHubTool, MockDatadogTool, MockSlackTool
 from feature_flag_env.engine_plugins import ChaosEngine, ApprovalWorkflow
 from feature_flag_env.historical_patterns import CustomerProfile, PatternAnalyzer, DeploymentPattern
+from feature_flag_env.anomaly_detection import AnomalyDetector
 import uuid
 import random
 
@@ -102,6 +103,7 @@ class FeatureFlagEnvironment:
         # --- Historical Pattern Learning ---
         self._customer_profile: Optional[CustomerProfile] = None
         self._pattern_analyzer: Optional[PatternAnalyzer] = None
+        self._anomaly_detector = AnomalyDetector()
         self._extra_context_data: Dict[str, Any] = {}
 
    
@@ -187,6 +189,11 @@ class FeatureFlagEnvironment:
                 self._approval_workflow = ApprovalWorkflow()
             self._approval_workflow.reset()
         
+        if self._anomaly_detector:
+            self._anomaly_detector.reset()
+        self._extra_context_data = {}
+        self._extra_context_data = {}
+
         initial_metrics = self.simulator.step(target_rollout=0.0)
 
         observation = FeatureFlagObservation(
@@ -543,6 +550,19 @@ class FeatureFlagEnvironment:
             if observation.approval_status == "PENDING":
                 conf = 1.0 - observation.error_rate * 10.0 # simple confidence metric
                 self._approval_workflow.process_mock_approval(conf)
+
+        # --- Anomaly Detection (Side-car) ---
+        if self._anomaly_detector:
+            # Update baseline with current observation
+            metrics = {
+                "error_rate": observation.error_rate,
+                "latency_p99_ms": observation.latency_p99_ms,
+                "revenue_impact": observation.revenue_impact,
+                "system_health_score": observation.system_health_score
+            }
+            self._anomaly_detector.update_baselines(metrics)
+            # Detect
+            observation.extra_context["anomaly"] = self._anomaly_detector.detect(metrics)
 
         return observation
 
