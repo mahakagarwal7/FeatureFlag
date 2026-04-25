@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "clean": "if exist .next rmdir /s /q .next",
     "dev": "next dev",
+    "dev:turbo": "next dev --turbo",
+    "dev:safe": "node --max-old-space-size=4096 node_modules/next/dist/bin/next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
