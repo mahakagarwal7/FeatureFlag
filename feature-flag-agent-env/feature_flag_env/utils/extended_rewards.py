@@ -33,22 +33,17 @@ from feature_flag_env.utils.reward_functions import calculate_reward
 # ---------------------------------------------------------------------------
 
 def stakeholder_satisfaction_reward(
-    sentiments: Dict[str, float],
+    feedback_vector: Dict[str, float],
 ) -> float:
     """
-    Reward based on average stakeholder satisfaction.
-
-    Args:
-        sentiments: mapping of role → satisfaction score [0, 1]
-
-    Returns:
-        Reward in range [-0.3, +0.3]
+    Reward based on structured consensus and conflict vectors.
     """
-    if not sentiments:
+    if not feedback_vector:
         return 0.0
-    avg = sum(sentiments.values()) / len(sentiments)
-    # Map [0, 1] satisfaction to [-0.3, +0.3]
-    return (avg - 0.5) * 0.6
+    consensus = feedback_vector.get("consensus_score", 0.0)
+    conflict = feedback_vector.get("conflict_level", 0.0)
+    # Formula: +0.3 * consensus - 0.15 * conflict
+    return (0.3 * consensus) - (0.15 * conflict)
 
 
 def milestone_reward(
@@ -84,14 +79,72 @@ def phase_progress_reward(
 
 def tool_usage_reward(
     tools_used: int = 0,
-    max_bonus: float = 0.1,
+    max_bonus: float = 0.25,
 ) -> float:
     """
-    Placeholder for future tool-usage incentives.
-    Currently returns a small bonus if tools are connected/used.
+    Rewards +0.05 per tool used, capped at max_bonus to prevent spam hacking.
     """
     if tools_used > 0:
-        return min(tools_used * 0.03, max_bonus)
+        return min(tools_used * 0.05, max_bonus)
+    return 0.0
+
+def communication_reward(
+    action: FeatureFlagAction,
+    error_rate: float,
+    communications_sent: int = 0,
+    max_bonus: float = 0.3,
+) -> float:
+    """
+    Independent reward for communicating via Slack.
+    Bonus doubles during critical scenarios (high error rate).
+    """
+    is_comm = False
+    if action.action_type == "TOOL_CALL" and action.tool_call and action.tool_call.get("tool_name", "") == "slack":
+        is_comm = True
+    
+    if not is_comm:
+        return 0.0
+
+    # Approximate cap check based on historical communications sent
+    current_reward_basis = communications_sent * 0.1
+    if current_reward_basis >= max_bonus:
+        return 0.0
+        
+    if error_rate > 0.05:
+        return min(0.15, max_bonus - current_reward_basis)
+    return min(0.10, max_bonus - current_reward_basis)
+
+def exploration_reward(
+    action: FeatureFlagAction,
+    recent_actions: list = None,
+) -> float:
+    """
+    Encourages action diversity by supplying +0.05 when a new action type 
+    is attempted outside the recent 10-step window constraint.
+    """
+    if not recent_actions:
+        return 0.05
+    recent_10 = recent_actions[-10:]
+    recent_types = [a.action_type for a in recent_10 if hasattr(a, 'action_type')]
+    if action.action_type not in recent_types:
+        return 0.05
+    return 0.0
+
+
+def tool_failure_penalty(
+    observation: FeatureFlagObservation,
+    action: FeatureFlagAction,
+) -> float:
+    """
+    Penalizes if the current action is a tool call that failed or was attempted when tools are disabled.
+    """
+    if action.action_type != "TOOL_CALL":
+        return 0.0
+    
+    tr = observation.last_tool_result
+    if tr is not None and not tr.get("success", False):
+        return -2.0
+        
     return 0.0
 
 
@@ -113,11 +166,13 @@ def calculate_extended_reward(
     new_observation: FeatureFlagObservation,
     action: FeatureFlagAction,
     *,
-    stakeholder_sentiments: Optional[Dict[str, float]] = None,
+    stakeholder_feedback_dict: Optional[Dict[str, float]] = None,
     phase_advanced: bool = False,
     phase_progress_value: float = 0.0,
     phase_reward_weight: float = 1.0,
     tools_used: int = 0,
+    communications_sent: int = 0,
+    action_history: list = None,
     base_reward_fn=None,
 ) -> float:
     """
@@ -130,7 +185,7 @@ def calculate_extended_reward(
     base = reward_fn(old_observation, new_observation, action)
 
     # 2. Stakeholder component
-    stk = stakeholder_satisfaction_reward(stakeholder_sentiments or {})
+    stk = stakeholder_satisfaction_reward(stakeholder_feedback_dict or {})
 
     # 3. Milestone component
     mst = milestone_reward(phase_advanced, phase_reward_weight)
@@ -141,7 +196,16 @@ def calculate_extended_reward(
     # 5. Tool usage component
     tul = tool_usage_reward(tools_used)
 
-    total = base + stk + mst + ppg + tul
+    # 6. Communication (Slack) component
+    com = communication_reward(action, old_observation.error_rate, communications_sent)
+
+    # 7. Exploration component
+    exp = exploration_reward(action, action_history)
+
+    # 8. Tool Failure Penalty
+    tfp = tool_failure_penalty(new_observation, action)
+
+    total = base + stk + mst + ppg + tul + com + exp + tfp
 
     # Clip
     clip_enabled, clip_min, clip_max = _get_extended_clip_config()

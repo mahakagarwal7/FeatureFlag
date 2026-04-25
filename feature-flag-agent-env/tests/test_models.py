@@ -86,6 +86,47 @@ def test_observation_creation():
         print(f"❌ Failed to create observation: {e}")
         return False
 
+def test_to_numpy_array():
+    """Test observation outputs standard bounding numpy constraints."""
+    print("\n🧪 Testing Numpy Array Bounds...")
+    try:
+        from feature_flag_env.models import FeatureFlagObservation
+        import numpy as np
+
+        obs = FeatureFlagObservation(
+            current_rollout_percentage=50.0,
+            error_rate=0.01,
+            latency_p99_ms=100.0,
+            user_adoption_rate=0.4,
+            revenue_impact=1000.0,
+            system_health_score=0.9,
+            active_users=1000,
+            feature_name="test_f",
+            time_step=2
+        )
+        vector = obs.to_numpy_array()
+        
+        # Check standard properties
+        if not isinstance(vector, np.ndarray):
+            print("❌ to_numpy_array did not return a numpy array")
+            return False
+        
+        if len(vector) != 17:
+            print(f"❌ Returned vector length {len(vector)} != 17")
+            return False
+            
+        # Check bounding
+        for i, val in enumerate(vector):
+            if val < -1.001 or val > 1.001:  # small epsilon for floating precision
+                print(f"❌ Vector index {i} out of bounds: {val}")
+                return False
+                
+        print("✅ Numpy bounding checks successfully enforced on matrix array.")
+        return True
+    except Exception as e:
+        print(f"❌ Failed array bounding check: {e}")
+        return False
+
 def test_state_tracking():
     """Test episode state tracking"""
     print("\n🧪 Testing State Tracking...")
@@ -117,6 +158,7 @@ def main():
     results = []
     results.append(test_action_validation())
     results.append(test_observation_creation())
+    results.append(test_to_numpy_array())
     results.append(test_state_tracking())
     
     print("\n" + "=" * 50)

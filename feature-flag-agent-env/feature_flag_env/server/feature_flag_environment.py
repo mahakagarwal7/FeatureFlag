@@ -262,10 +262,10 @@ class FeatureFlagEnvironment:
 
         # --- Advance mission phase ---
         if self._mission_tracker is not None:
-            approval = (
-                self._stakeholder_panel.overall_approval
-                if self._stakeholder_panel else True
-            )
+            approval = True
+            if self._stakeholder_panel is not None:
+                approval = self._stakeholder_panel.overall_approval
+
             mission_result = self._mission_tracker.step(
                 rollout_pct=action.target_percentage,
                 error_rate=observation.error_rate,
@@ -273,8 +273,8 @@ class FeatureFlagEnvironment:
             )
             phase_advanced = mission_result["phase_advanced"]
             phase_progress_value = self._mission_tracker.phase_progress
-            current_phase = self._mission_tracker.current_phase
-            phase_reward_weight = current_phase.reward_weight if current_phase else 1.0
+            curr_ph = self._mission_tracker.current_phase
+            phase_reward_weight = curr_ph.reward_weight if curr_ph else 1.0
 
         # --- Populate extended observation fields ---
         observation = self._populate_extended_obs(observation)
@@ -292,12 +292,19 @@ class FeatureFlagEnvironment:
             elif self._state.difficulty == "hard":
                 base_fn = calculate_reward_task3
 
+            # Extract tool and communication metrics from history
+            tools_used = sum(1 for a in self._state.action_history if getattr(a, "action_type", "") == "TOOL_CALL")
+            comms_sent = sum(1 for a in self._state.action_history if getattr(a, "action_type", "") == "TOOL_CALL" and getattr(a, "tool_call", {}).get("tool_name", "") == "slack")
+
             reward = calculate_extended_reward(
                 old_obs, observation, action,
-                stakeholder_sentiments=stakeholder_sentiments,
+                stakeholder_feedback_dict=observation.stakeholder_feedback_dict,
                 phase_advanced=phase_advanced,
                 phase_progress_value=phase_progress_value,
                 phase_reward_weight=phase_reward_weight,
+                tools_used=tools_used,
+                communications_sent=comms_sent,
+                action_history=self._state.action_history,
                 base_reward_fn=base_fn,
             )
         else:
@@ -492,6 +499,13 @@ class FeatureFlagEnvironment:
                 tool_reward_bonus = -0.02
         else:
             tool_reward_bonus = -0.05  # penalty for invalid tool call
+            tool_result_data = {
+                "tool": action.tool_call.get("tool_name", "unknown") if action.tool_call else "unknown",
+                "action": action.tool_call.get("action_name", "unknown") if action.tool_call else "unknown",
+                "success": False,
+                "error": "Tool Integration Layer is disabled or ToolManager is missing.",
+                "latency_ms": 0.0
+            }
 
         # Observation stays unchanged (no new simulator step — rollout frozen)
         observation = FeatureFlagObservation(
@@ -504,7 +518,7 @@ class FeatureFlagEnvironment:
             active_users=old_obs.active_users,
             feature_name=old_obs.feature_name,
             time_step=self._state.step_count,
-            reward=tool_reward_bonus,
+            reward=0.0, # Placeholder
             done=False,
         )
 
@@ -515,7 +529,32 @@ class FeatureFlagEnvironment:
         if self._tool_manager:
             observation.tool_memory_summary = self._tool_manager.memory.summary()
 
-        self._state.total_reward += tool_reward_bonus
+        # --- Calculate extended reward for tool call ---
+        phase_progress_value = 0.0
+        phase_reward_weight = 1.0
+        if self._mission_tracker:
+            phase_progress_value = self._mission_tracker.phase_progress
+            if self._mission_tracker.current_phase:
+                phase_reward_weight = self._mission_tracker.current_phase.reward_weight
+
+        # Extract tool and communication metrics from history
+        tools_used = sum(1 for a in self._state.action_history if a.action_type == "TOOL_CALL")
+        comms_sent = sum(1 for a in self._state.action_history if a.action_type == "TOOL_CALL" and a.tool_call and a.tool_call.get("tool_name", "") == "slack")
+
+        reward = calculate_extended_reward(
+            old_obs, observation, action,
+            stakeholder_feedback_dict=observation.stakeholder_feedback_dict,
+            phase_advanced=False,
+            phase_progress_value=phase_progress_value,
+            phase_reward_weight=phase_reward_weight,
+            tools_used=tools_used,
+            communications_sent=comms_sent,
+            action_history=self._state.action_history,
+            base_reward_fn=calculate_reward # Tool calls use standard base
+        )
+
+        observation.reward = reward
+        self._state.total_reward += reward
 
         done = self._check_done(observation, action)
         self._state.done = done
@@ -534,10 +573,38 @@ class FeatureFlagEnvironment:
 
         return StepResponse(
             observation=observation,
-            reward=tool_reward_bonus,
+            reward=reward,
             done=done,
             info=info,
         )
+
+    @property
+    def observation_space(self):
+        """
+        Dynamically generates the canonical continuous RL `Box` bounding ranges matching
+        the 17-dimensional vector extraction in FeatureFlagObservation.to_numpy_array().
+        """
+        import numpy as np
+        
+        lows = np.array([0.0, 0.0, 0.0, 0.0, 0.0, -1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float32)
+        highs = np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], dtype=np.float32)
+        
+        try:
+            from gymnasium.spaces import Box
+            return Box(low=lows, high=highs, dtype=np.float32)
+        except ImportError:
+            try:
+                from gym.spaces import Box
+                return Box(low=lows, high=highs, dtype=np.float32)
+            except ImportError:
+                # Provides a pseudo environment space shape
+                class PseudoBox:
+                    def __init__(self, low, high, shape, dtype):
+                        self.low = low
+                        self.high = high
+                        self.shape = shape
+                        self.dtype = dtype
+                return PseudoBox(lows, highs, (17,), np.float32)
 
 
 def make_environment(

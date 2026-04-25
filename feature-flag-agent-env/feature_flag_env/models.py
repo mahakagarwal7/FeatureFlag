@@ -153,12 +153,15 @@ Maximize rollout and revenue while keeping:
         parts = [base_str]
 
         if self.mission_name is not None:
-            po = "- " + "\n- ".join(self.phase_objectives) if self.phase_objectives else "None"
-            pa = ", ".join(self.phase_allowed_actions) if self.phase_allowed_actions else "All"
+            po = "- " + "\n- ".join(self.phase_objectives or []) if self.phase_objectives is not None else "None"
+            pa = ", ".join(self.phase_allowed_actions or []) if self.phase_allowed_actions is not None else "All"
+            _idx = self.phase_index if self.phase_index is not None else 0
+            _total = self.total_phases if self.total_phases is not None else 1
+            _progress = self.phase_progress if self.phase_progress is not None else 0.0
             parts.append(f"""
 MISSION & PHASE:
-- Mission: {self.mission_name} (Phase {self.phase_index + 1}/{self.total_phases}: {self.current_phase})
-- Phase Progress: {self.phase_progress * 100:.0f}%
+- Mission: {self.mission_name} (Phase {_idx + 1}/{_total}: {self.current_phase})
+- Phase Progress: {_progress * 100:.0f}%
 - allowed_actions: [{pa}]
 - Objectives:
 {po}
@@ -202,12 +205,15 @@ BELIEF & TRENDS (Last {bd.get('steps_tracked', 0)} steps):
 """)
 
         if self.mission_name is not None:
+            _idx = self.phase_index if self.phase_index is not None else 0
+            _total = self.total_phases if self.total_phases is not None else 1
+            _progress = self.phase_progress if self.phase_progress is not None else 0.0
             parts.append(f"""
 MISSION PROGRESS:
 - Mission: {self.mission_name}
-- Phase: {self.current_phase} ({self.phase_index}/{self.total_phases})
-- Phase Progress: {self.phase_progress:.0%}
-- Phases Completed: {self.phases_completed}/{self.total_phases}
+- Phase: {self.current_phase} ({_idx}/{_total})
+- Phase Progress: {_progress:.0%}
+- Phases Completed: {self.phases_completed or 0}/{_total}
 """)
 
         if self.tools_connected is not None:
@@ -237,7 +243,46 @@ LAST TOOL RESULT:
             f"latency={self.latency_p99_ms:.1f}>"
         )
 
+    def to_numpy_array(self) -> Any:
+        import numpy as np
 
+        def _clip(val: float, min_val: float, max_val: float) -> float:
+            return max(min_val, min(val, max_val))
+
+        vector = np.zeros(17, dtype=np.float32)
+
+        # Base Metrics (0-4)
+        vector[0] = self.current_rollout_percentage / 100.0
+        vector[1] = _clip(self.error_rate, 0.0, 1.0)
+        vector[2] = _clip(self.latency_p99_ms / 500.0, 0.0, 1.0)
+        vector[3] = _clip(self.user_adoption_rate, 0.0, 1.0)
+        vector[4] = _clip(self.system_health_score, 0.0, 1.0)
+
+        # Stakeholders (5-10)
+        fd = self.stakeholder_feedback_dict or {}
+        vector[5] = _clip(fd.get("devops_score", self.stakeholder_devops_sentiment or 0.0), -1.0, 1.0)
+        vector[6] = _clip(fd.get("product_score", self.stakeholder_product_sentiment or 0.0), -1.0, 1.0)
+        vector[7] = _clip(fd.get("customer_score", self.stakeholder_customer_sentiment or 0.0), -1.0, 1.0)
+        vector[8] = _clip(fd.get("consensus_score", 0.0), -1.0, 1.0)
+        vector[9] = _clip(fd.get("conflict_level", 0.0), 0.0, 1.0)
+        
+        maj = fd.get("majority_approval", self.stakeholder_overall_approval)
+        vector[10] = 1.0 if maj else 0.0
+
+        # Mission (11-12)
+        total_p = max(1, self.total_phases or 1)
+        vector[11] = _clip((self.phase_index or 0) / float(total_p), 0.0, 1.0)
+        vector[12] = _clip(self.phase_progress or 0.0, 0.0, 1.0)
+
+        # Tools (13-16)
+        vector[13] = _clip((self.tools_connected or 0) / 10.0, 0.0, 1.0)
+        vector[14] = _clip((self.tools_alerts_active or 0) / 5.0, 0.0, 1.0)
+        
+        tr = self.last_tool_result or {}
+        vector[15] = 1.0 if tr.get("success") else 0.0
+        vector[16] = _clip(tr.get("latency_ms", 0) / 2000.0, 0.0, 1.0)
+
+        return vector
 
 class FeatureFlagState(BaseModel):
     """
@@ -251,7 +296,7 @@ class FeatureFlagState(BaseModel):
 
     rollout_history: List[float] = Field(default_factory=list)
    
-    action_history: List[str] = Field(default_factory=list)
+    action_history: List[FeatureFlagAction] = Field(default_factory=list)
 
     done: bool = Field(default=False)
 
@@ -265,7 +310,7 @@ class FeatureFlagState(BaseModel):
         self.step_count += 1
         self.total_reward += reward
         self.rollout_history.append(action.target_percentage)
-        self.action_history.append(action.action_type)  
+        self.action_history.append(action)  
 
     def is_episode_complete(self) -> bool:
         return self.done or self.step_count >= self.max_steps

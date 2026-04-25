@@ -14,6 +14,8 @@ from feature_flag_env.utils.extended_rewards import (
     milestone_reward,
     phase_progress_reward,
     tool_usage_reward,
+    communication_reward,
+    exploration_reward,
     calculate_extended_reward,
 )
 from feature_flag_env.utils.reward_functions import calculate_reward
@@ -48,20 +50,20 @@ def _make_action(**overrides):
 # --- Individual components -------------------------------------------------
 
 def test_stakeholder_satisfaction():
-    """Stakeholder reward should map satisfaction to [-0.3, +0.3]."""
+    """Stakeholder reward should map consensus and conflict."""
     print("🧪 Stakeholder satisfaction reward...")
 
-    # All happy (satisfaction = 1.0 → reward = +0.3)
-    r = stakeholder_satisfaction_reward({"devops": 1.0, "product": 1.0, "customer_success": 1.0})
-    assert abs(r - 0.3) < 0.01, f"Expected ~+0.3, got {r}"
+    # High consensus, low conflict (+0.3 * 1.0 - 0.15 * 0.0 = +0.3)
+    r = stakeholder_satisfaction_reward({"consensus_score": 1.0, "conflict_level": 0.0})
+    assert abs(r - 0.3) < 0.01
 
-    # All neutral (satisfaction = 0.5 → reward = 0.0)
-    r = stakeholder_satisfaction_reward({"devops": 0.5, "product": 0.5, "customer_success": 0.5})
-    assert abs(r) < 0.01, f"Expected ~0.0, got {r}"
+    # Mixed (+0.3 * 0.5 - 0.15 * 0.5 = 0.15 - 0.075 = 0.075)
+    r = stakeholder_satisfaction_reward({"consensus_score": 0.5, "conflict_level": 0.5})
+    assert abs(r - 0.075) < 0.01
 
-    # All unhappy (satisfaction = 0.0 → reward = -0.3)
-    r = stakeholder_satisfaction_reward({"devops": 0.0, "product": 0.0, "customer_success": 0.0})
-    assert abs(r - (-0.3)) < 0.01, f"Expected ~-0.3, got {r}"
+    # High conflict, low consensus (+0.3 * 0.0 - 0.15 * 1.0 = -0.15)
+    r = stakeholder_satisfaction_reward({"consensus_score": 0.0, "conflict_level": 1.0})
+    assert abs(r - (-0.15)) < 0.01
 
     # Empty → 0
     r = stakeholder_satisfaction_reward({})
@@ -94,11 +96,52 @@ def test_phase_progress():
 
 
 def test_tool_usage():
-    """Tool usage should give small bonus."""
+    """Tool usage should give bonus capped at 0.25."""
     print("🧪 Tool usage reward...")
     assert tool_usage_reward(0) == 0.0
-    r = tool_usage_reward(2)
-    assert 0 < r <= 0.1, f"Expected small positive, got {r}"
+    assert tool_usage_reward(1) == 0.05
+    assert tool_usage_reward(5) == 0.25
+    assert tool_usage_reward(10) == 0.25 # Capped
+    print("   ✅ Passed")
+    return True
+
+def test_communication():
+    """Slack bonus should trigger and handle caps."""
+    print("🧪 Communication reward...")
+    action = _make_action(action_type="TOOL_CALL", tool_call={"tool_name": "slack"})
+    
+    # Standard bonus
+    r = communication_reward(action, error_rate=0.01, communications_sent=0)
+    assert r == 0.10
+    
+    # Crisis bonus
+    r = communication_reward(action, error_rate=0.10, communications_sent=0)
+    assert r == 0.15
+    
+    # Capped
+    r = communication_reward(action, error_rate=0.01, communications_sent=3) # 0.1 * 3 = 0.3
+    assert r == 0.0
+    
+    print("   ✅ Passed")
+    return True
+
+def test_exploration():
+    """Exploration bonus should reward novelty within 10 step window."""
+    print("🧪 Exploration reward...")
+    
+    history = [
+        _make_action(action_type="MAINTAIN"),
+        _make_action(action_type="MAINTAIN")
+    ]
+    
+    # New action
+    action_inc = _make_action(action_type="INCREASE_ROLLOUT")
+    assert exploration_reward(action_inc, history) == 0.05
+    
+    # Repeat action (within history)
+    action_maint = _make_action(action_type="MAINTAIN")
+    assert exploration_reward(action_maint, history) == 0.0
+    
     print("   ✅ Passed")
     return True
 
@@ -125,8 +168,9 @@ def test_composite_backward_compatible():
         else:
             os.environ["FEATURE_FLAG_REWARD_CLIP"] = prev_clip
 
-    assert abs(base - extended) < 0.01, \
-        f"With no extras, extended ({extended:.3f}) should match base ({base:.3f})"
+    # Note: Extended includes +0.05 exploration bonus for first action
+    assert abs((base + 0.05) - extended) < 0.01, \
+        f"Extended ({extended:.3f}) should match base ({base:.3f}) + 0.05 exploration bonus"
     print(f"   ✅ Base={base:.3f}, Extended={extended:.3f}")
     return True
 
@@ -145,11 +189,12 @@ def test_composite_with_all_components():
         base = calculate_reward(old_obs, new_obs, action)
         extended = calculate_extended_reward(
             old_obs, new_obs, action,
-            stakeholder_sentiments={"devops": 0.8, "product": 0.7, "customer_success": 0.9},
+            stakeholder_feedback_dict={"consensus_score": 0.8, "conflict_level": 0.1},
             phase_advanced=True,
             phase_progress_value=0.5,
             phase_reward_weight=1.0,
             tools_used=1,
+            action_history=[action]
         )
     finally:
         if prev_clip is None:
@@ -175,6 +220,8 @@ def main():
         test_milestone(),
         test_phase_progress(),
         test_tool_usage(),
+        test_communication(),
+        test_exploration(),
         test_composite_backward_compatible(),
         test_composite_with_all_components(),
     ]
