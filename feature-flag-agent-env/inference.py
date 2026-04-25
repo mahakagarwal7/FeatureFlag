@@ -684,19 +684,24 @@ def main():
     model_display = Path(args.rl_model).name if args.rl_model else os.getenv("MODEL_NAME", "gpt-4o-mini")
     
     if args.agent == "rl":
-        from agents.rl_agent import RLAgent
+        from agents.enterprise_agent_v2 import EnterpriseAgentV2
+        
+        # Use Master Model by default if not specified
+        model_path = args.rl_model or "models/enterprise_master_v2.best.pth"
+        
         if args.rl_train_mode:
-            agent = RLAgent(task=args.task, model_path=args.rl_model, training=True)
+            agent = EnterpriseAgentV2(task=args.task, model_path=model_path, training=True)
             print("WARNING: RL is running in training mode (exploration enabled)", file=sys.stderr)
         else:
-            agent = RLAgent(
+            agent = EnterpriseAgentV2(
                 task=args.task,
-                model_path=args.rl_model,
+                model_path=model_path,
                 training=False,
                 epsilon=0.0,
                 epsilon_min=0.0,
             )
             agent.epsilon = 0.0
+        print(f"[*] Initialized Enterprise Master V2 (22-dim) with model: {model_path}")
     elif args.agent == "hitl":
         from agents.human_in_loop_agent import HumanInLoopAgent
 

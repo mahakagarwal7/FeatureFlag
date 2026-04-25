@@ -65,7 +65,7 @@ class RLAgent:
     ):
         self.task = task
         self.training = training
-        self.state_dim = 19 # Enterprise State Dimensions
+        self.state_dim = 19 # Enterprise State Dimensions (Legacy Compatibility)
         self.action_dim = len(self.ACTIONS)
 
         self.gamma = gamma
