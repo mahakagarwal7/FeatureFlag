@@ -314,32 +314,43 @@ CHAOS INCIDENT ACTIVE:
         vector[15] = 1.0 if tr_val.get("success") else 0.0
         vector[16] = _clip(float(tr_val.get("latency_ms", 0)) / 2000.0, 0.0, 1.0)
 
-        # Chaos, HITL, Anomaly, Benchmarking, Risk (17-21)
-        # Vector size: 22
-        vector = np.concatenate([vector, np.zeros(5, dtype=np.float32)])
-        
-        # 17: Chaos
+        # Chaos & HITL (17-18)
+        vector = np.concatenate([vector, np.zeros(2, dtype=np.float32)])
         if self.chaos_incident:
             ci_val: Dict[str, Any] = self.chaos_incident if self.chaos_incident is not None else {}
             vector[17] = _clip(float(ci_val.get("intensity", 0.0)), 0.0, 1.0)
         
-        # 18: HITL
         status_map = {"NONE": 0.0, "PENDING": 0.3, "APPROVED": 1.0, "REJECTED": -0.5}
         vector[18] = status_map.get(self.approval_status, 0.0)
 
+        return vector
+
+    def to_master_numpy(self) -> Any:
+        """Specialized 22-dimensional vector for Enterprise Master Training."""
+        import numpy as np
+        
+        # Get base 19-dim vector first
+        base_vector = self.to_numpy_array()
+        
+        def _clip(val: float, min_val: float, max_val: float) -> float:
+            return max(min_val, min(val, max_val))
+
+        # Append 3 extra dimensions (19, 20, 21)
+        extra = np.zeros(3, dtype=np.float32)
+        
         # 19: Anomaly Score (From Side-car)
         anom = self.extra_context.get("tenant_anomaly", {})
-        vector[19] = _clip(float(anom.get("anomaly_score", 0.0)), 0.0, 1.0)
+        extra[0] = _clip(float(anom.get("anomaly_score", 0.0)), 0.0, 1.0)
 
         # 20: Benchmarking Percentile (From Side-car)
         bench = self.extra_context.get("benchmarking", {})
-        vector[20] = _clip(float(bench.get("percentile", 0.5)), 0.0, 1.0)
+        extra[1] = _clip(float(bench.get("percentile", 0.5)), 0.0, 1.0)
 
         # 21: Pattern Risk (From Side-car)
         risk = self.extra_context.get("tenant_pattern_risk", 0.0)
-        vector[21] = _clip(float(risk), 0.0, 1.0)
+        extra[2] = _clip(float(risk), 0.0, 1.0)
 
-        return vector
+        return np.concatenate([base_vector, extra])
 
 class FeatureFlagState(BaseModel):
     """
