@@ -14,6 +14,7 @@ environment remotely, which is required for OpenEnv specification.
 """
 
 from fastapi import FastAPI, HTTPException, Request, Depends
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, APIKeyHeader
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
@@ -144,6 +145,25 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,  # Γ£à Use lifespan instead of on_event
+)
+
+# Allow browser clients (Next.js frontend, local tooling) to call backend endpoints.
+frontend_origins_env = os.getenv("FRONTEND_ORIGINS", "")
+frontend_origins = [
+    origin.strip() for origin in frontend_origins_env.split(",") if origin.strip()
+]
+if not frontend_origins:
+    frontend_origins = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=frontend_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Global environment instance (one per server)

@@ -14,6 +14,7 @@ environment remotely, which is required for OpenEnv specification.
 """
 
 from fastapi import FastAPI, HTTPException, Request, Depends
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, APIKeyHeader
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
@@ -148,6 +149,15 @@ app = FastAPI(
 
 # Global environment instance (one per server)
 environment: Optional[FeatureFlagEnvironment] = None
+
+# Enable CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # =========================
@@ -439,13 +449,17 @@ async def get_state():
         )
     
     try:
-        state = environment.state()
-        return state
-    
-    except ValueError as e:
+        return environment.state()
+    except ValueError:
+        # Auto-initialize if state requested before reset
+        logger.info("Auto-initializing environment on /state call")
+        environment.reset()
+        return environment.state()
+    except Exception as e:
+        logger.exception("Unexpected error in /state: %s", e)
         raise HTTPException(
-            status_code=400,
-            detail=str(e)
+            status_code=500,
+            detail=f"State fetch failed: {str(e)}"
         )
 
 
