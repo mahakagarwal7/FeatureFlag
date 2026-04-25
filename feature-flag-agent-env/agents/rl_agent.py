@@ -65,7 +65,7 @@ class RLAgent:
     ):
         self.task = task
         self.training = training
-        self.state_dim = 9
+        self.state_dim = 19 # Enterprise State Dimensions
         self.action_dim = len(self.ACTIONS)
 
         self.gamma = gamma
@@ -211,20 +211,8 @@ class RLAgent:
         return clipped_state
 
     def encode_state(self, obs: FeatureFlagObservation) -> np.ndarray:
-        encoded = np.array(
-            [
-                self._safe_ratio(obs.current_rollout_percentage, 100.0),
-                self._safe_ratio(obs.error_rate, 0.25),
-                self._safe_ratio(obs.latency_p99_ms, 500.0),
-                self._safe_ratio(obs.user_adoption_rate, 1.0),
-                float(np.tanh(obs.revenue_impact / 1000.0)),
-                self._safe_ratio(obs.system_health_score, 1.0),
-                self._safe_ratio(float(obs.active_users), 100000.0),
-                self._safe_ratio(float(obs.time_step), 50.0),
-                self._feature_embedding(obs.feature_name),
-            ],
-            dtype=np.float32,
-        )
+        # Use the environment's native 19-dimensional vector
+        encoded = obs.to_numpy_array()
         if self.state_safety_enabled:
             return self.validate_and_clip_state(encoded, source="encoded_state")
         return encoded
