@@ -1,5 +1,9 @@
 # Use an official Python runtime as a parent image
-FROM python:3.10-slim
+FROM python:3.11-slim
+
+# Make logs more readable in containerized environments.
+ENV PYTHONUNBUFFERED=1 \
+	PYTHONDONTWRITEBYTECODE=1
 
 # Set the working directory in the container
 WORKDIR /app
@@ -8,7 +12,8 @@ WORKDIR /app
 COPY feature-flag-agent-env/requirements.txt ./requirements.txt
 
 # Install dependencies securely
-RUN pip install --no-cache-dir -r requirements.txt
+RUN python -m pip install --upgrade pip && \
+	pip install --no-cache-dir -r requirements.txt
 
 # Copy the project source tree into the container
 COPY feature-flag-agent-env/ ./
