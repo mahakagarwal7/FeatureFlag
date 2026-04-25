@@ -142,8 +142,12 @@ def tool_failure_penalty(
         return 0.0
     
     tr = observation.last_tool_result
-    if tr is not None and not tr.get("success", False):
-        return -2.0
+    # If tr is None or success is explicitly False, it's a failure.
+    if tr is None:
+        return -2.5
+    
+    if not tr.get("success", False):
+        return -2.5
         
     return 0.0
 
@@ -174,6 +178,7 @@ def calculate_extended_reward(
     communications_sent: int = 0,
     action_history: list = None,
     base_reward_fn=None,
+    tool_reward_bonus: float = 0.0,
 ) -> float:
     """
     Calculate total reward = base_reward + extended components.
@@ -205,7 +210,7 @@ def calculate_extended_reward(
     # 8. Tool Failure Penalty
     tfp = tool_failure_penalty(new_observation, action)
 
-    total = base + stk + mst + ppg + tul + com + exp + tfp
+    total = base + stk + mst + ppg + tul + com + exp + tfp + tool_reward_bonus
 
     # Clip
     clip_enabled, clip_min, clip_max = _get_extended_clip_config()

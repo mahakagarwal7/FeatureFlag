@@ -1,4 +1,4 @@
-﻿import argparse
+import argparse
 import os
 import random
 from typing import List, Optional
@@ -130,6 +130,10 @@ class RLAgent:
         )
         self.task1_inference_safety_enabled = (
             os.getenv("FF_TASK1_INFERENCE_SAFETY", "1").strip().lower()
+            in {"1", "true", "yes", "on"}
+        )
+        self.task3_inference_safety_enabled = (
+            os.getenv("FF_TASK3_INFERENCE_SAFETY", "1").strip().lower()
             in {"1", "true", "yes", "on"}
         )
         self.action_mask_events = 0
@@ -339,6 +343,27 @@ class RLAgent:
 
         return action_idx
 
+    def _task3_inference_override(
+        self, action_idx: int, observation: FeatureFlagObservation
+    ) -> int:
+        if self.training or self.task != "task3" or not self.task3_inference_safety_enabled:
+            return action_idx
+
+        rollout = float(observation.current_rollout_percentage)
+        error = float(observation.error_rate)
+
+        # Kickstart: If at 0% but system is perfectly healthy, force increase.
+        if rollout == 0.0 and error < 0.02 and action_idx != 0:
+            self.action_safety_overrides += 1
+            return 0
+            
+        # Stalling prevention: If stuck far below target and low risk, nudge forward.
+        if rollout < 40.0 and error < 0.03 and action_idx in {1, 2, 3, 5}:
+            self.action_safety_overrides += 1
+            return 0
+
+        return action_idx
+
     def _select_action(self, state: np.ndarray, observation: Optional[FeatureFlagObservation] = None) -> int:
         if self.state_safety_enabled:
             state = self.validate_and_clip_state(state, source="policy_input")
@@ -523,6 +548,7 @@ class RLAgent:
         action_idx = self._select_action(state, observation)
         action_idx = self._task2_inference_override(action_idx, observation)
         action_idx = self._task1_inference_override(action_idx, observation)
+        action_idx = self._task3_inference_override(action_idx, observation)
 
         self.last_state = state
         self.last_action = action_idx

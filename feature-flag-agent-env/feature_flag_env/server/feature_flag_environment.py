@@ -306,6 +306,7 @@ class FeatureFlagEnvironment:
                 communications_sent=comms_sent,
                 action_history=self._state.action_history,
                 base_reward_fn=base_fn,
+                tool_reward_bonus=0.0 # Standard actions have no tool bonus
             )
         else:
             # Original reward path — unchanged
@@ -550,7 +551,8 @@ class FeatureFlagEnvironment:
             tools_used=tools_used,
             communications_sent=comms_sent,
             action_history=self._state.action_history,
-            base_reward_fn=calculate_reward # Tool calls use standard base
+            base_reward_fn=calculate_reward, # Tool calls use standard base
+            tool_reward_bonus=tool_reward_bonus
         )
 
         observation.reward = reward
