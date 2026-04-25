@@ -24,6 +24,8 @@ from feature_flag_env.missions import MissionTracker, get_mission
 from feature_flag_env.tools.tool_manager import ToolManager
 from feature_flag_env.tools.tool_interface import ToolCallRequest
 from feature_flag_env.tools.mock_adapters import MockGitHubTool, MockDatadogTool, MockSlackTool
+from feature_flag_env.engine_plugins import ChaosEngine, ApprovalWorkflow
+from feature_flag_env.historical_patterns import CustomerProfile, PatternAnalyzer, DeploymentPattern
 import uuid
 import random
 
@@ -33,7 +35,9 @@ class FeatureFlagEnvironment:
                  stakeholders_enabled: bool = False,
                  mission_config: Optional[str] = None,
                  tools_enabled: bool = False,
-                 tool_manager: Optional[ToolManager] = None):
+                 tool_manager: Optional[ToolManager] = None,
+                 chaos_enabled: bool = False,
+                 hitl_enabled: bool = False):
         self.scenario_library = {
             "stable": {
                 "name": "stable_feature",
@@ -88,6 +92,17 @@ class FeatureFlagEnvironment:
         # --- Tool integration ---
         self.tools_enabled = tools_enabled
         self._tool_manager: Optional[ToolManager] = tool_manager
+
+        # --- Chaos & HITL plugins ---
+        self.chaos_enabled = chaos_enabled
+        self.hitl_enabled = hitl_enabled
+        self._chaos_engine: Optional[ChaosEngine] = None
+        self._approval_workflow: Optional[ApprovalWorkflow] = None
+
+        # --- Historical Pattern Learning ---
+        self._customer_profile: Optional[CustomerProfile] = None
+        self._pattern_analyzer: Optional[PatternAnalyzer] = None
+        self._extra_context_data: Dict[str, Any] = {}
 
    
     def reset(self) -> FeatureFlagObservation:
@@ -161,6 +176,17 @@ class FeatureFlagEnvironment:
                 self._tool_manager.register(MockSlackTool())
             self._tool_manager.reset()
 
+        # --- Initialize Chaos & HITL ---
+        if self.chaos_enabled:
+            if self._chaos_engine is None:
+                self._chaos_engine = ChaosEngine()
+            self._chaos_engine.reset()
+        
+        if self.hitl_enabled:
+            if self._approval_workflow is None:
+                self._approval_workflow = ApprovalWorkflow()
+            self._approval_workflow.reset()
+        
         initial_metrics = self.simulator.step(target_rollout=0.0)
 
         observation = FeatureFlagObservation(
@@ -219,9 +245,35 @@ class FeatureFlagEnvironment:
                     action.target_percentage = float(phase.target_rollout_max)
                     action.reason += f" | Clamped to phase exit bounds ({phase.target_rollout_max}%)"
 
+            # Constraint 3: HITL Approval
+            if self.hitl_enabled and self._approval_workflow:
+                # If we are crossing a phase boundary, request approval if not already approved
+                next_phase_trigger = action.target_percentage >= phase.target_rollout_max
+                if next_phase_trigger and self._approval_workflow.status == "NONE":
+                    self._approval_workflow.request_approval(phase.name, f"Transition from {phase.name} requested")
+                
+                if self._approval_workflow.status == "PENDING":
+                    # Block progress: force MAINTAIN at the boundary
+                    action.action_type = "MAINTAIN"
+                    action.target_percentage = float(phase.target_rollout_max)
+                    action.reason += " | BLOCKED BY PENDING APPROVAL"
+                elif self._approval_workflow.status == "REJECTED":
+                    action.action_type = "ROLLBACK"
+                    action.target_percentage = 0.0
+                    action.reason += " | REJECTED BY STAKEHOLDERS"
+                    self._approval_workflow.reset() # Allow re-requesting after rollback
+
+        # --- Process Chaos Monkey ---
+        chaos_incident = None
+        if self.chaos_enabled and self._chaos_engine is not None:
+            chaos_incident = self._chaos_engine.step()
+
         # --- Handle TOOL_CALL action type ---
         if action.action_type == "TOOL_CALL":
-            return self._handle_tool_call(action)
+            res = self._handle_tool_call(action)
+            if res and chaos_incident:
+                res.observation.chaos_incident = chaos_incident
+            return res
 
         if self.simulator is None:
             raise ValueError("Simulator not initialized. Call reset()")
@@ -405,6 +457,24 @@ class FeatureFlagEnvironment:
             return "mission_complete"
         return "task_or_env_condition"
 
+    @property
+    def extra_context(self) -> Dict[str, Any]:
+        """
+        Extended context for agents. Computes real-time pattern risk 
+        without modifying core step logic.
+        """
+        if self._pattern_analyzer and self.previous_observation:
+            self._extra_context_data["pattern_risk"] = self._pattern_analyzer.compute_risk(
+                self.previous_observation.current_rollout_percentage,
+                self.previous_observation.error_rate
+            )
+        return self._extra_context_data
+
+    def set_customer_profile(self, profile: CustomerProfile):
+        """Inject a customer profile and analyzer into the environment."""
+        self._customer_profile = profile
+        self._pattern_analyzer = PatternAnalyzer(profile)
+
     # --- Extended helpers ---------------------------------------------------
 
     def _populate_extended_obs(
@@ -458,9 +528,21 @@ class FeatureFlagEnvironment:
             if current_p:
                 observation.phase_objectives = current_p.objectives
                 observation.phase_allowed_actions = current_p.allowed_actions
-            else:
-                observation.phase_objectives = None
-                observation.phase_allowed_actions = None
+
+        if self._chaos_engine and self._chaos_engine.active_incident:
+            observation.chaos_incident = self._chaos_engine.active_incident
+            # Apply chaos effects to observation metrics (vandalize metrics slightly)
+            if observation.chaos_incident["type"] == "latency_spike":
+                observation.latency_p99_ms *= (1.0 + observation.chaos_incident["intensity"])
+            elif observation.chaos_incident["type"] == "error_burst":
+                observation.error_rate += observation.chaos_incident["intensity"] * 0.1
+
+        if self._approval_workflow:
+            observation.approval_status = self._approval_workflow.get_status()
+            # If pending, simulate a human looking at it
+            if observation.approval_status == "PENDING":
+                conf = 1.0 - observation.error_rate * 10.0 # simple confidence metric
+                self._approval_workflow.process_mock_approval(conf)
 
         return observation
 
@@ -584,12 +666,12 @@ class FeatureFlagEnvironment:
     def observation_space(self):
         """
         Dynamically generates the canonical continuous RL `Box` bounding ranges matching
-        the 17-dimensional vector extraction in FeatureFlagObservation.to_numpy_array().
+        the 19-dimensional vector extraction in FeatureFlagObservation.to_numpy_array().
         """
         import numpy as np
         
-        lows = np.array([0.0, 0.0, 0.0, 0.0, 0.0, -1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float32)
-        highs = np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], dtype=np.float32)
+        lows = np.array([0.0, 0.0, 0.0, 0.0, 0.0, -1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float32)
+        highs = np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0], dtype=np.float32)
         
         try:
             from gymnasium.spaces import Box
@@ -606,7 +688,7 @@ class FeatureFlagEnvironment:
                         self.high = high
                         self.shape = shape
                         self.dtype = dtype
-                return PseudoBox(lows, highs, (17,), np.float32)
+                return PseudoBox(lows, highs, (19,), np.float32)
 
 
 def make_environment(
@@ -615,11 +697,16 @@ def make_environment(
     mission_config: Optional[str] = None,
     tools_enabled: bool = False,
     tool_manager: Optional[ToolManager] = None,
+    chaos_enabled: bool = False,
+    hitl_enabled: bool = False,
 ):
+    """Canonical factory for FeatureFlagEnvironment."""
     return FeatureFlagEnvironment(
         scenario_config,
         stakeholders_enabled=stakeholders_enabled,
         mission_config=mission_config,
         tools_enabled=tools_enabled,
         tool_manager=tool_manager,
+        chaos_enabled=chaos_enabled,
+        hitl_enabled=hitl_enabled,
     )

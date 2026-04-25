@@ -49,19 +49,20 @@ class ToolMemory:
                 "tools_used": [],
             }
 
+        recent_list = list(self._buffer)
         return {
             "total_calls": len(self._buffer),
             "recent_results": [
                 {
-                    "tool": r.tool_name,
-                    "action": r.action_name,
-                    "success": r.success,
-                    "summary": r.summary,
+                    "tool": str(getattr(r, "tool_name", "unknown")),
+                    "action": str(getattr(r, "action_name", "unknown")),
+                    "success": bool(getattr(r, "success", False)),
+                    "summary": str(getattr(r, "summary", "")),
                 }
-                for r in list(self._buffer)[-5:]  # last 5
+                for r in recent_list[-5:]
             ],
-            "tools_used": list({r.tool_name for r in self._buffer}),
-            "error_count": sum(1 for r in self._buffer if not r.success),
+            "tools_used": list({str(getattr(r, "tool_name", "unknown")) for r in self._buffer}),
+            "error_count": sum(1 for r in self._buffer if not getattr(r, "success", True)),
         }
 
 
@@ -97,16 +98,25 @@ class ToolManager:
     def unregister(self, tool_name: str) -> None:
         self._tools.pop(tool_name, None)
 
+    def get_tool(self, name: str) -> Optional[Tool]:
+        return self._tools.get(name)
+
+    def register_tool(self, tool: Tool) -> None:
+        """Alias for register() to match Registry pattern."""
+        self.register(tool)
+
+    def list_tools(self) -> List[str]:
+        """Alias for tool_names to match Registry pattern."""
+        return self.tool_names
+
     @property
     def tool_names(self) -> List[str]:
         return list(self._tools.keys())
 
     @property
     def connected_count(self) -> int:
+        """Return the number of registered tools."""
         return len(self._tools)
-
-    def get_tool(self, name: str) -> Optional[Tool]:
-        return self._tools.get(name)
 
     def reset(self) -> None:
         """Reset all tools and memory for a new episode."""

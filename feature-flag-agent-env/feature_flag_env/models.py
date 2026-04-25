@@ -120,6 +120,14 @@ class FeatureFlagObservation(BaseModel):
         default=None, description="Rolling summary of recent tool calls"
     )
 
+    # --- Extended: Chaos & HITL (Advanced Features) ---
+    chaos_incident: Optional[Dict[str, Any]] = Field(
+        default=None, description="Current active chaos incident"
+    )
+    approval_status: str = Field(
+        default="NONE", description="HITL Approval status: NONE, PENDING, APPROVED, REJECTED"
+    )
+
     def to_prompt_string(self) -> str:
         """
         Converts observation into LLM-friendly text.
@@ -167,16 +175,16 @@ MISSION & PHASE:
 {po}
 """)
 
-        if self.stakeholder_feedback_dict is not None:
-            fd = self.stakeholder_feedback_dict
+        sf = self.stakeholder_feedback_dict
+        if sf is not None:
             parts.append(f"""
 STAKEHOLDER FEEDBACK VECTOR:
-- DevOps Sentiment:  {fd.get('devops_score', 0.0):+.2f} — {fd.get('devops_message', '')}
-- Product Sentiment: {fd.get('product_score', 0.0):+.2f} — {fd.get('product_message', '')}
-- Customer Success:  {fd.get('customer_score', 0.0):+.2f} — {fd.get('customer_message', '')}
-- Consensus Score:   {fd.get('consensus_score', 0.0):+.2f}  |  Conflict Level: {fd.get('conflict_level', 0.0):.2f}
-- Majority Approval: {'YES' if fd.get('majority_approval') else 'NO'}
-- Priority Concerns: {'; '.join(fd.get('all_concerns', [])) if fd.get('all_concerns') else 'None'}
+- DevOps Sentiment:  {sf.get('devops_score', 0.0):+.2f} — {str(sf.get('devops_message', ''))}
+- Product Sentiment: {sf.get('product_score', 0.0):+.2f} — {str(sf.get('product_message', ''))}
+- Customer Success:  {sf.get('customer_score', 0.0):+.2f} — {str(sf.get('customer_message', ''))}
+- Consensus Score:   {sf.get('consensus_score', 0.0):+.2f}  |  Conflict Level: {float(sf.get('conflict_level', 0.0)):.2f}
+- Majority Approval: {'YES' if sf.get('majority_approval') else 'NO'}
+- Priority Concerns: {'; '.join(sf.get('all_concerns', [])) if sf.get('all_concerns') else 'None'}
 """)
         elif self.stakeholder_devops_sentiment is not None:
             # Fallback for older tests using the raw sentiment fields
@@ -234,6 +242,18 @@ LAST TOOL RESULT:
 - Latency: {tr.get('latency_ms', 0):.0f}ms
 """)
 
+        if self.chaos_incident:
+            ci = self.chaos_incident
+            parts.append(f"""
+CHAOS INCIDENT ACTIVE:
+- Type: {ci.get('type')}
+- Intensity: {ci.get('intensity', 0):.2f}
+- Time Remaining: {ci.get('duration')} steps
+""")
+
+        if self.approval_status != "NONE":
+            parts.append(f"APPROVAL STATUS: {self.approval_status}")
+
         return "\n".join(parts)
 
     def __repr__(self):
@@ -281,6 +301,14 @@ LAST TOOL RESULT:
         tr = self.last_tool_result or {}
         vector[15] = 1.0 if tr.get("success") else 0.0
         vector[16] = _clip(tr.get("latency_ms", 0) / 2000.0, 0.0, 1.0)
+
+        # Chaos & HITL (17-18)
+        vector = np.concatenate([vector, np.zeros(2, dtype=np.float32)])
+        if self.chaos_incident:
+            vector[17] = _clip(self.chaos_incident.get("intensity", 0.0), 0.0, 1.0)
+        
+        status_map = {"NONE": 0.0, "PENDING": 0.3, "APPROVED": 1.0, "REJECTED": -0.5}
+        vector[18] = status_map.get(self.approval_status, 0.0)
 
         return vector
 
