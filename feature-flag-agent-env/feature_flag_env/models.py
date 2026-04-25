@@ -103,6 +103,12 @@ class FeatureFlagObservation(BaseModel):
     )
     phases_completed: Optional[int] = Field(default=None, ge=0)
     total_phases: Optional[int] = Field(default=None, ge=0)
+    phase_objectives: Optional[List[str]] = Field(
+        default=None, description="Current phase qualitative objectives"
+    )
+    phase_allowed_actions: Optional[List[str]] = Field(
+        default=None, description="Allowed actions in the current phase"
+    )
 
     # --- Extended: Tool status summary ---
     tools_connected: Optional[int] = Field(default=None, ge=0)
@@ -145,6 +151,18 @@ Maximize rollout and revenue while keeping:
 """
         # --- Extended sections (only rendered when populated) ---
         parts = [base_str]
+
+        if self.mission_name is not None:
+            po = "- " + "\n- ".join(self.phase_objectives) if self.phase_objectives else "None"
+            pa = ", ".join(self.phase_allowed_actions) if self.phase_allowed_actions else "All"
+            parts.append(f"""
+MISSION & PHASE:
+- Mission: {self.mission_name} (Phase {self.phase_index + 1}/{self.total_phases}: {self.current_phase})
+- Phase Progress: {self.phase_progress * 100:.0f}%
+- allowed_actions: [{pa}]
+- Objectives:
+{po}
+""")
 
         if self.stakeholder_feedback_dict is not None:
             fd = self.stakeholder_feedback_dict

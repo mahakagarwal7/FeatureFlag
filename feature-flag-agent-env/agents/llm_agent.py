@@ -192,24 +192,11 @@ class LLMAgent:
                 )
 
             prompt = f"""
-Feature rollout decision:
+{observation.to_prompt_string()}
 
-Rollout: {observation.current_rollout_percentage}%
-Error: {observation.error_rate*100:.2f}%
-Latency: {observation.latency_p99_ms}
-Adoption: {observation.user_adoption_rate}
-Revenue: {observation.revenue_impact}
-Health: {observation.system_health_score}
-
-For task2, aim for a final rollout around 65-70% and avoid overshooting above 70% unless you have a strong reason.
-
-Allowed action_type values only:
-- INCREASE_ROLLOUT
-- DECREASE_ROLLOUT
-- MAINTAIN
-- HALT_ROLLOUT
-- FULL_ROLLOUT
-- ROLLBACK
+Based on the MISSION & PHASE constraints above (if explicitly provided), strictly adhere to the `allowed_actions`.
+Plan your progression step-by-step to fulfill the listed phase objectives without exceeding the target bounds or errors.
+If no mission phase is specified, aim for a final stable rollout.
 
 Respond with JSON only (no markdown, no prose):
 {{

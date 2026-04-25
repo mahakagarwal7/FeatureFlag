@@ -195,6 +195,30 @@ class FeatureFlagEnvironment:
         if self.simulator is None:
             raise ValueError("Simulator not initialized. Call reset()")
 
+        # --- Feature 3: Phase Constraints ---
+        if self._mission_tracker and self._mission_tracker.current_phase:
+            phase = self._mission_tracker.current_phase
+            
+            # Constraint 1: Rejected Actions
+            if action.action_type not in phase.allowed_actions:
+                self._state.add_step(action, reward=-1.0)
+                obs_out = self.previous_observation
+                obs_out.reward = -1.0
+                obs_out.time_step = self._state.step_count
+                obs_out = self._populate_extended_obs(obs_out)
+                return StepResponse(
+                    observation=obs_out,
+                    reward=-1.0,
+                    done=self._check_done(obs_out, action),
+                    info={"error": f"Action {action.action_type} is not allowed in phase '{phase.name}'"}
+                )
+            
+            # Constraint 2: Skip Prevention (Clamp Target)
+            if action.action_type in {"INCREASE_ROLLOUT", "FULL_ROLLOUT"}:
+                if action.target_percentage > phase.target_rollout_max:
+                    action.target_percentage = float(phase.target_rollout_max)
+                    action.reason += f" | Clamped to phase exit bounds ({phase.target_rollout_max}%)"
+
         # --- Handle TOOL_CALL action type ---
         if action.action_type == "TOOL_CALL":
             return self._handle_tool_call(action)
@@ -421,6 +445,14 @@ class FeatureFlagEnvironment:
             observation.phase_progress = info["phase_progress"]
             observation.phases_completed = info["phases_completed"]
             observation.total_phases = info["total_phases"]
+            
+            current_p = self._mission_tracker.current_phase
+            if current_p:
+                observation.phase_objectives = current_p.objectives
+                observation.phase_allowed_actions = current_p.allowed_actions
+            else:
+                observation.phase_objectives = None
+                observation.phase_allowed_actions = None
 
         return observation
 

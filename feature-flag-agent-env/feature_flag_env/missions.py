@@ -40,6 +40,13 @@ class Phase:
 
     # Limits
     max_steps: int = 10
+    allowed_actions: List[str] = field(
+        default_factory=lambda: [
+            "INCREASE_ROLLOUT", "DECREASE_ROLLOUT", "MAINTAIN",
+            "HALT_ROLLOUT", "ROLLBACK", "FULL_ROLLOUT", "TOOL_CALL"
+        ]
+    )
+    objectives: List[str] = field(default_factory=list)
 
     # Success criteria
     max_error_rate: float = 0.05       # must stay below this
@@ -234,6 +241,8 @@ MISSION_LIBRARY: Dict[str, Mission] = {
                 target_rollout_min=0.0,
                 target_rollout_max=5.0,
                 max_steps=5,
+                allowed_actions=["INCREASE_ROLLOUT", "MAINTAIN", "ROLLBACK", "TOOL_CALL"],
+                objectives=["Deploy to internal users", "Validate critical payment pathways with tools"],
                 max_error_rate=0.02,
                 require_stakeholder_approval=False,
                 reward_weight=0.8,
@@ -244,6 +253,8 @@ MISSION_LIBRARY: Dict[str, Mission] = {
                 target_rollout_min=5.0,
                 target_rollout_max=25.0,
                 max_steps=10,
+                allowed_actions=["INCREASE_ROLLOUT", "DECREASE_ROLLOUT", "MAINTAIN", "HALT_ROLLOUT", "ROLLBACK", "TOOL_CALL"],
+                objectives=["Slowly increase rollout", "Gather product/customer feedback"],
                 max_error_rate=0.04,
                 require_stakeholder_approval=True,
                 reward_weight=1.0,
@@ -254,6 +265,8 @@ MISSION_LIBRARY: Dict[str, Mission] = {
                 target_rollout_min=25.0,
                 target_rollout_max=60.0,
                 max_steps=15,
+                allowed_actions=["INCREASE_ROLLOUT", "DECREASE_ROLLOUT", "MAINTAIN", "HALT_ROLLOUT", "ROLLBACK", "TOOL_CALL"],
+                objectives=["Reach standard traffic capacity", "Ensure robust error handling continues"],
                 max_error_rate=0.05,
                 require_stakeholder_approval=False,
                 reward_weight=1.2,
@@ -264,6 +277,8 @@ MISSION_LIBRARY: Dict[str, Mission] = {
                 target_rollout_min=60.0,
                 target_rollout_max=100.0,
                 max_steps=10,
+                allowed_actions=["INCREASE_ROLLOUT", "DECREASE_ROLLOUT", "MAINTAIN", "HALT_ROLLOUT", "ROLLBACK", "FULL_ROLLOUT", "TOOL_CALL"],
+                objectives=["Clear the environment for 100% rollout"],
                 max_error_rate=0.05,
                 require_stakeholder_approval=True,
                 reward_weight=1.5,
@@ -281,6 +296,8 @@ MISSION_LIBRARY: Dict[str, Mission] = {
                 target_rollout_min=0.0,
                 target_rollout_max=20.0,
                 max_steps=5,
+                allowed_actions=["INCREASE_ROLLOUT", "MAINTAIN", "ROLLBACK", "TOOL_CALL"],
+                objectives=["Fast beta rollout"],
                 max_error_rate=0.05,
                 require_stakeholder_approval=False,
                 reward_weight=1.0,
@@ -291,6 +308,8 @@ MISSION_LIBRARY: Dict[str, Mission] = {
                 target_rollout_min=20.0,
                 target_rollout_max=100.0,
                 max_steps=10,
+                allowed_actions=["INCREASE_ROLLOUT", "MAINTAIN", "ROLLBACK", "FULL_ROLLOUT", "TOOL_CALL"],
+                objectives=["Execute the remainder of the release"],
                 max_error_rate=0.05,
                 require_stakeholder_approval=False,
                 reward_weight=1.0,
@@ -308,6 +327,8 @@ MISSION_LIBRARY: Dict[str, Mission] = {
                 target_rollout_min=0.0,
                 target_rollout_max=5.0,
                 max_steps=8,
+                allowed_actions=["INCREASE_ROLLOUT", "MAINTAIN", "TOOL_CALL"],
+                objectives=["Ensure zero integration errors using shadow data models", "Validate with Datadog tools"],
                 max_error_rate=0.01,
                 require_stakeholder_approval=False,
                 reward_weight=1.0,
@@ -318,6 +339,8 @@ MISSION_LIBRARY: Dict[str, Mission] = {
                 target_rollout_min=5.0,
                 target_rollout_max=20.0,
                 max_steps=10,
+                allowed_actions=["INCREASE_ROLLOUT", "DECREASE_ROLLOUT", "MAINTAIN", "HALT_ROLLOUT", "ROLLBACK", "TOOL_CALL"],
+                objectives=["Validate small-scale production updates"],
                 max_error_rate=0.03,
                 require_stakeholder_approval=True,
                 reward_weight=1.2,
@@ -328,6 +351,8 @@ MISSION_LIBRARY: Dict[str, Mission] = {
                 target_rollout_min=20.0,
                 target_rollout_max=70.0,
                 max_steps=15,
+                allowed_actions=["INCREASE_ROLLOUT", "DECREASE_ROLLOUT", "MAINTAIN", "HALT_ROLLOUT", "ROLLBACK", "TOOL_CALL"],
+                objectives=["Continue schema migration safely"],
                 max_error_rate=0.04,
                 require_stakeholder_approval=True,
                 reward_weight=1.5,
@@ -338,6 +363,8 @@ MISSION_LIBRARY: Dict[str, Mission] = {
                 target_rollout_min=70.0,
                 target_rollout_max=100.0,
                 max_steps=10,
+                allowed_actions=["INCREASE_ROLLOUT", "DECREASE_ROLLOUT", "MAINTAIN", "HALT_ROLLOUT", "ROLLBACK", "FULL_ROLLOUT", "TOOL_CALL"],
+                objectives=["Push remaining traffic to new database"],
                 max_error_rate=0.05,
                 require_stakeholder_approval=True,
                 reward_weight=1.5,
