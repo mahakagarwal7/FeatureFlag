@@ -71,6 +71,8 @@ def test_resolve_target_percentage_defaults_for_actions():
 
 def test_decide_falls_back_to_baseline_when_no_api_key(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.delenv("API_KEY", raising=False)
     agent = LLMAgent()
     assert agent.use_baseline
 

@@ -33,9 +33,9 @@ class LLMAgent:
         self.api_base_url = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
         # Hackathon validator injects API_KEY and API_BASE_URL for proxy metering.
         self.api_key = (
-            os.getenv("API_KEY")
+            os.getenv("OPENAI_API_KEY")
+            or os.getenv("API_KEY")
             or os.getenv("HF_TOKEN")
-            or os.getenv("OPENAI_API_KEY")
         )
         self.timeout_seconds = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "20"))
         self.max_retries = int(os.getenv("OPENAI_MAX_RETRIES", "2"))
