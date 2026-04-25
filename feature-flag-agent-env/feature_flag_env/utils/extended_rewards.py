@@ -8,6 +8,10 @@ Components:
 - milestone_reward: bonus for completing a mission phase
 - phase_progress_reward: incremental reward for progress within a phase
 - tool_usage_reward: placeholder for future tool-usage incentives
+- communication_reward: bonus for using communication tools (Slack) during incidents
+- exploration_reward: encourages action diversity
+- tool_failure_penalty: penalizes invalid or failed tool calls
+- anomaly_penalty_reward: penalizes high anomaly scores from side-car monitor
 
 Usage:
     calculate_extended_reward(
@@ -152,6 +156,18 @@ def tool_failure_penalty(
     return 0.0
 
 
+def anomaly_penalty_reward(
+    anomaly_score: float,
+) -> float:
+    """
+    Penalizes high anomaly scores detected by the side-car.
+    """
+    if anomaly_score > 0.6:
+        # Scale penalty: 0.6 -> -0.12, 1.0 -> -0.2
+        return -0.1 * (anomaly_score * 2)
+    return 0.0
+
+
 # ---------------------------------------------------------------------------
 # Composite reward
 # ---------------------------------------------------------------------------
@@ -210,7 +226,12 @@ def calculate_extended_reward(
     # 8. Tool Failure Penalty
     tfp = tool_failure_penalty(new_observation, action)
 
-    total = base + stk + mst + ppg + tul + com + exp + tfp + tool_reward_bonus
+    # 9. Anomaly Penalty
+    anom = 0.0
+    if "anomaly" in new_observation.extra_context:
+        anom = anomaly_penalty_reward(new_observation.extra_context["anomaly"].get("anomaly_score", 0.0))
+
+    total = base + stk + mst + ppg + tul + com + exp + tfp + anom + tool_reward_bonus
 
     # Clip
     clip_enabled, clip_min, clip_max = _get_extended_clip_config()

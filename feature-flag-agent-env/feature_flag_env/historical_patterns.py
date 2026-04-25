@@ -41,11 +41,15 @@ class PatternMemory:
 
 class CustomerProfile:
     """Encapsulates customer-specific risk traits and historical data."""
-    def __init__(self, customer_id: str, risk_tolerance: float = 0.5):
+    def __init__(self, customer_id: str, 
+                 risk_tolerance: float = 0.5,
+                 risk_weights: Optional[Dict[str, float]] = None,
+                 historical_patterns: Optional[List[DeploymentPattern]] = None):
         self.customer_id = customer_id
         self.risk_tolerance = risk_tolerance # 0 (risk-averse) to 1 (risk-tolerant)
+        self.risk_weights = risk_weights or {}
         self.memory = PatternMemory()
-        self.known_patterns: List[DeploymentPattern] = []
+        self.known_patterns = historical_patterns or []
 
     def add_pattern(self, pattern: DeploymentPattern):
         self.known_patterns.append(pattern)
@@ -60,7 +64,7 @@ class PatternAnalyzer:
         """
         Compute a risk score [0.0, 1.0] based on patterns and current state.
         """
-        risk: float = 0.0
+        risk = 0.0
         
         # 1. Check against known patterns
         for pattern in self.profile.known_patterns:
