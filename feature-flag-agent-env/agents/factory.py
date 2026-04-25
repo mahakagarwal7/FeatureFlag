@@ -10,6 +10,9 @@ def get_agent(name: str, **kwargs):
         return LLMAgent()
     elif name == "hybrid":
         return HybridAgent()
+    elif name == "master":
+        from agents.master_agent import MasterAgent
+        return MasterAgent(**kwargs)
     elif name == "rl":
         from agents.rl_agent import RLAgent
         return RLAgent(**kwargs)
