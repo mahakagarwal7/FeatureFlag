@@ -64,7 +64,7 @@ class PatternAnalyzer:
         """
         Compute a risk score [0.0, 1.0] based on patterns and current state.
         """
-        risk = 0.0
+        risk = float(0.0)
         
         # 1. Check against known patterns
         for pattern in self.profile.known_patterns:

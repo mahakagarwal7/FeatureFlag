@@ -27,6 +27,7 @@ from feature_flag_env.tools.mock_adapters import MockGitHubTool, MockDatadogTool
 from feature_flag_env.engine_plugins import ChaosEngine, ApprovalWorkflow
 from feature_flag_env.historical_patterns import CustomerProfile, PatternAnalyzer, DeploymentPattern
 from feature_flag_env.anomaly_detection import AnomalyDetector
+from feature_flag_env.benchmarking import BenchmarkEngine
 import uuid
 import random
 
@@ -38,7 +39,8 @@ class FeatureFlagEnvironment:
                  tools_enabled: bool = False,
                  tool_manager: Optional[ToolManager] = None,
                  chaos_enabled: bool = False,
-                 hitl_enabled: bool = False):
+                 hitl_enabled: bool = False,
+                 benchmarking_config: Optional[Dict[str, str]] = None):
         self.scenario_library = {
             "stable": {
                 "name": "stable_feature",
@@ -105,6 +107,11 @@ class FeatureFlagEnvironment:
         self._pattern_analyzer: Optional[PatternAnalyzer] = None
         self._anomaly_detector = AnomalyDetector()
         self._extra_context_data: Dict[str, Any] = {}
+
+        # --- Benchmarking Analytics ---
+        self.benchmarking_config = benchmarking_config
+        self._benchmark_engine: Optional[BenchmarkEngine] = None
+        self.analytics: Dict[str, Any] = {}
 
    
     def reset(self) -> FeatureFlagObservation:
@@ -192,7 +199,16 @@ class FeatureFlagEnvironment:
         if self._anomaly_detector:
             self._anomaly_detector.reset()
         self._extra_context_data = {}
-        self._extra_context_data = {}
+
+        # --- Reset Benchmarking ---
+        if self.benchmarking_config:
+            self._benchmark_engine = BenchmarkEngine(
+                industry=self.benchmarking_config.get("industry", "saas"),
+                company_size=self.benchmarking_config.get("company_size", "mid-market")
+            )
+        else:
+            self._benchmark_engine = None
+        self.analytics = {}
 
         initial_metrics = self.simulator.step(target_rollout=0.0)
 
@@ -212,6 +228,7 @@ class FeatureFlagEnvironment:
 
         # Populate extended observation fields at reset
         observation = self._populate_extended_obs(observation)
+        self._update_analytics(observation)
 
         self.previous_observation = observation
         return observation
@@ -337,6 +354,7 @@ class FeatureFlagEnvironment:
 
         # --- Populate extended observation fields ---
         observation = self._populate_extended_obs(observation)
+        self._update_analytics(observation)
 
         # --- Calculate reward ---
         use_extended = bool(stakeholder_sentiments or self._mission_tracker)
@@ -566,6 +584,15 @@ class FeatureFlagEnvironment:
 
         return observation
 
+    def _update_analytics(self, observation: FeatureFlagObservation):
+        """Update external analytics layer (non-agent, non-reward data)."""
+        if self._benchmark_engine is not None:
+            metrics = {
+                "error_rate": observation.error_rate,
+                "latency_p99_ms": observation.latency_p99_ms,
+            }
+            self.analytics["benchmark"] = self._benchmark_engine.analyze(metrics)
+
     def _handle_tool_call(self, action: FeatureFlagAction) -> StepResponse:
         """Handle TOOL_CALL action — dispatches to ToolManager, no rollout change."""
         old_obs = self.previous_observation
@@ -719,6 +746,7 @@ def make_environment(
     tool_manager: Optional[ToolManager] = None,
     chaos_enabled: bool = False,
     hitl_enabled: bool = False,
+    benchmarking_config: Optional[Dict[str, str]] = None,
 ):
     """Canonical factory for FeatureFlagEnvironment."""
     return FeatureFlagEnvironment(
@@ -729,4 +757,5 @@ def make_environment(
         tool_manager=tool_manager,
         chaos_enabled=chaos_enabled,
         hitl_enabled=hitl_enabled,
+        benchmarking_config=benchmarking_config,
     )

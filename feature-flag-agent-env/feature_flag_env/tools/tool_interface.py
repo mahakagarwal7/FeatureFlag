@@ -92,6 +92,7 @@ class Tool(ABC):
         available_actions: List[str],
         timeout_ms: float = 5000.0,
         max_calls_per_episode: int = 50,
+        **kwargs,
     ):
         self.name = name
         self.mode = mode

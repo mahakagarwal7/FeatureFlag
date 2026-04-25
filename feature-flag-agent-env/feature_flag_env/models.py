@@ -291,14 +291,14 @@ CHAOS INCIDENT ACTIVE:
         vector[4] = _clip(self.system_health_score, 0.0, 1.0)
 
         # Stakeholders (5-10)
-        fd = self.stakeholder_feedback_dict or {}
-        vector[5] = _clip(fd.get("devops_score", self.stakeholder_devops_sentiment or 0.0), -1.0, 1.0)
-        vector[6] = _clip(fd.get("product_score", self.stakeholder_product_sentiment or 0.0), -1.0, 1.0)
-        vector[7] = _clip(fd.get("customer_score", self.stakeholder_customer_sentiment or 0.0), -1.0, 1.0)
-        vector[8] = _clip(fd.get("consensus_score", 0.0), -1.0, 1.0)
-        vector[9] = _clip(fd.get("conflict_level", 0.0), 0.0, 1.0)
+        stake_fd: Dict[str, Any] = self.stakeholder_feedback_dict if self.stakeholder_feedback_dict is not None else {}
+        vector[5] = _clip(stake_fd.get("devops_score", self.stakeholder_devops_sentiment or 0.0), -1.0, 1.0)
+        vector[6] = _clip(stake_fd.get("product_score", self.stakeholder_product_sentiment or 0.0), -1.0, 1.0)
+        vector[7] = _clip(stake_fd.get("customer_score", self.stakeholder_customer_sentiment or 0.0), -1.0, 1.0)
+        vector[8] = _clip(stake_fd.get("consensus_score", 0.0), -1.0, 1.0)
+        vector[9] = _clip(stake_fd.get("conflict_level", 0.0), 0.0, 1.0)
         
-        maj = fd.get("majority_approval", self.stakeholder_overall_approval)
+        maj = stake_fd.get("majority_approval", self.stakeholder_overall_approval)
         vector[10] = 1.0 if maj else 0.0
 
         # Mission (11-12)
@@ -310,18 +310,14 @@ CHAOS INCIDENT ACTIVE:
         vector[13] = _clip((self.tools_connected or 0) / 10.0, 0.0, 1.0)
         vector[14] = _clip((self.tools_alerts_active or 0) / 5.0, 0.0, 1.0)
         
-        tr_val = self.last_tool_result
-        if tr_val is None:
-            tr_val = {}
+        tr_val: Dict[str, Any] = self.last_tool_result if self.last_tool_result is not None else {}
         vector[15] = 1.0 if tr_val.get("success") else 0.0
         vector[16] = _clip(float(tr_val.get("latency_ms", 0)) / 2000.0, 0.0, 1.0)
 
         # Chaos & HITL (17-18)
         vector = np.concatenate([vector, np.zeros(2, dtype=np.float32)])
         if self.chaos_incident:
-            ci_val = self.chaos_incident
-            if ci_val is None:
-                ci_val = {}
+            ci_val: Dict[str, Any] = self.chaos_incident if self.chaos_incident is not None else {}
             vector[17] = _clip(float(ci_val.get("intensity", 0.0)), 0.0, 1.0)
         
         status_map = {"NONE": 0.0, "PENDING": 0.3, "APPROVED": 1.0, "REJECTED": -0.5}
