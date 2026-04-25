@@ -65,7 +65,7 @@ class RLAgent:
     ):
         self.task = task
         self.training = training
-        self.state_dim = 19 # Enterprise State Dimensions
+        self.state_dim = 22 # Enterprise State Dimensions (Expanded)
         self.action_dim = len(self.ACTIONS)
 
         self.gamma = gamma

@@ -51,10 +51,11 @@ class AnomalyDetector:
             var = sum((float(x) - mean)**2 for x in history_list) / len(history_list)
             std = math.sqrt(var)
             
-            if std < 0.0001: # Avoid division by zero for static metrics
-                continue
+            # Handle stationary metrics (std=0 or very small)
+            # If std is tiny, use a minimum epsilon (0.01) to ignore tiny jitters
+            effective_std = max(std, 0.01)
                 
-            z_score = abs(val - mean) / std
+            z_score = abs(val - mean) / effective_std
             if z_score > self.threshold:
                 anomalies.append(key)
                 max_z = max(max_z, z_score)
