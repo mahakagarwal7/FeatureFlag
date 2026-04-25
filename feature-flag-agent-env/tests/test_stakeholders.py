@@ -45,7 +45,6 @@ def test_devops_happy():
     assert fb.approval is True, "DevOps should approve healthy metrics"
     assert len(fb.priority_concerns) == 0
     print("   ✅ Passed")
-    return True
 
 
 def test_devops_unhappy():
@@ -57,7 +56,6 @@ def test_devops_unhappy():
     assert fb.approval is False
     assert len(fb.priority_concerns) > 0
     print("   ✅ Passed")
-    return True
 
 
 # --- Product ---------------------------------------------------------------
@@ -71,7 +69,6 @@ def test_product_happy():
     fb = s.get_feedback(_make_obs(current_rollout_percentage=20.0, user_adoption_rate=0.4))
     assert fb.sentiment > 0, f"Expected positive sentiment, got {fb.sentiment}"
     print("   ✅ Passed")
-    return True
 
 
 def test_product_stalled():
@@ -83,7 +80,6 @@ def test_product_stalled():
     assert any("velocity" in c or "low" in c for c in fb.priority_concerns), \
         f"Expected velocity/adoption concern, got {fb.priority_concerns}"
     print("   ✅ Passed")
-    return True
 
 
 # --- Customer Success ------------------------------------------------------
@@ -99,7 +95,6 @@ def test_customer_happy():
     assert fb.sentiment > 0, f"Expected positive sentiment, got {fb.sentiment}"
     assert fb.approval is True
     print("   ✅ Passed")
-    return True
 
 
 def test_customer_complaint_risk():
@@ -113,7 +108,6 @@ def test_customer_complaint_risk():
     assert any("complaint" in c for c in fb.priority_concerns), \
         f"Expected complaint concern, got {fb.priority_concerns}"
     print("   ✅ Passed")
-    return True
 
 
 # --- Panel -----------------------------------------------------------------
@@ -137,7 +131,6 @@ def test_panel():
         assert -1.0 <= fb.sentiment <= 1.0, f"{role} sentiment out of range: {fb.sentiment}"
 
     print("   ✅ Passed")
-    return True
 
 
 def test_satisfaction_ema():
@@ -156,7 +149,6 @@ def test_satisfaction_ema():
 
     assert high_sat > low_sat, f"Satisfaction should decrease: {high_sat} -> {low_sat}"
     print(f"   ✅ EMA: {high_sat:.3f} → {low_sat:.3f}")
-    return True
 
 
 # --- Main ------------------------------------------------------------------
