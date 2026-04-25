@@ -13,7 +13,7 @@ from feature_flag_env.models import FeatureFlagAction
 import time
 
 def run_stress_test():
-    print("🚀 Starting End-to-End Pipeline Stress Test...")
+    print("[START] Starting End-to-End Pipeline Stress Test...")
     
     # Initialize environment with full suite
     env = FeatureFlagEnvironment(
@@ -23,7 +23,7 @@ def run_stress_test():
     )
     obs = env.reset() # Returns FeatureFlagObservation
     
-    print(f"✅ Initialized: {obs.mission_name} | Phase: {obs.current_phase}")
+    print(f"[OK] Initialized: {obs.mission_name} | Phase: {obs.current_phase}")
     
     # Step 1: Tool Call (Testing Feature 3 & 5)
     print("\n--- Step 1: Slack Tool Call ---")
@@ -85,9 +85,9 @@ def run_stress_test():
     print(f"Mission Complete: {done}")
     
     if done and obs.current_rollout_percentage >= 100.0:
-        print("\n✅ SUCCESS: End-to-end pipeline is solid.")
+        print("\n[SUCCESS]: End-to-end pipeline is solid.")
     else:
-        print("\n⚠️ WARNING: Pipeline ended prematurely or didn't reach 100%.")
+        print("\n[WARNING]: Pipeline ended prematurely or didn't reach 100%.")
 
 if __name__ == "__main__":
     run_stress_test()
