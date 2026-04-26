@@ -227,7 +227,7 @@ const Dashboard = () => {
           </CardHeader>
           <CardContent>
             <div className="h-[300px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height={300} minHeight={300}>
                 <AreaChart data={state?.history?.map(h => ({ 
                   time: h.observation?.time_step, 
                   rollout: h.observation?.current_rollout_percentage,
@@ -261,7 +261,7 @@ const Dashboard = () => {
           </CardHeader>
           <CardContent>
             <div className="h-[220px]">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height={220} minHeight={220}>
                 <BarChart data={stakeholderData}>
                   <XAxis dataKey="name" fontSize={11} axisLine={false} tickLine={false} />
                   <YAxis hide domain={[-1, 1]} />

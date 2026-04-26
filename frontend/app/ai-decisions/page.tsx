@@ -86,7 +86,7 @@ export default function AIDecisionsPage() {
           </CardHeader>
           <CardContent>
             <div className="h-[350px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height={350} minHeight={350}>
                 <AreaChart data={rewardData.map((d, i) => ({ ...d, rollout: rolloutData[i]?.rollout }))}>
                   <defs>
                     <linearGradient id="colorReward" x1="0" y1="0" x2="0" y2="1">

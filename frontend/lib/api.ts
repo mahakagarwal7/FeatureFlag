@@ -247,12 +247,25 @@ export const api = {
 
   async getState(): Promise<State> {
     try {
-      return this.request<State>("/state", { method: "GET" });
+      const rawState = await this.request<any>("/state", { method: "GET" });
+      
+      // The Python backend serves 'rollout_history' and 'action_history' instead of a singular 'history' array
+      if (!Array.isArray(rawState.history) && Array.isArray(rawState.rollout_history)) {
+        rawState.history = rawState.rollout_history.map((obs: any, index: number) => {
+          const hasActionObj = Array.isArray(rawState.action_history) && index > 0 && rawState.action_history[index - 1];
+          return {
+            observation: obs,
+            action: hasActionObj ? rawState.action_history[index - 1][0] : null,
+            reward: hasActionObj ? rawState.action_history[index - 1][1] : 0,
+          };
+        });
+      }
+      return rawState as State;
     } catch (error) {
       // Environment may not be initialized yet; reset once and retry.
       if (error instanceof Error && /not initialized|400/i.test(error.message)) {
         await this.reset();
-        return this.request<State>("/state", { method: "GET" });
+        return this.getState();
       }
       throw error;
     }
