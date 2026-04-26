@@ -2,8 +2,9 @@ import type { NextConfig } from "next";
 import path from "path";
 
 const nextConfig: NextConfig = {
-  turbopack: {
-    root: path.resolve(__dirname),
+  /* config options here */
+  experimental: {
+    outputFileTracingRoot: path.join(process.cwd(), '../../'),
   },
   logging: {
     fetches: {

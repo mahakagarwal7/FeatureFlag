@@ -363,8 +363,8 @@ class FeatureFlagState(BaseModel):
     total_reward: float = Field(default=0.0)
 
     rollout_history: List[float] = Field(default_factory=list)
-   
     action_history: List[FeatureFlagAction] = Field(default_factory=list)
+    observation_history: List[FeatureFlagObservation] = Field(default_factory=list)
 
     done: bool = Field(default=False)
 

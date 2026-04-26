@@ -118,13 +118,6 @@ export interface Observation {
   extra_context: Record<string, unknown>;
 }
 
-export interface ActionHistoryItem {
-  action_type?: string;
-  target_percentage?: number;
-  reason?: string;
-  timestamp?: string;
-}
-
 export interface State {
   episode_id: string;
   step_count: number;
@@ -138,7 +131,7 @@ export interface State {
   history: Array<{
     observation?: Observation;
     reward?: number;
-    action?: ActionHistoryItem;
+    action?: Record<string, unknown> | null;
     [key: string]: unknown;
   }>;
 }
@@ -166,103 +159,33 @@ export interface DashboardData {
   alerts: Array<Record<string, unknown>>;
 }
 
-type MonitoringDashboardResponse = {
-  health?: { score?: number; status?: string };
-  metrics?: {
-    error_rate?: number;
-    avg_latency_ms?: number;
-    uptime_seconds?: number;
-    active_users?: number;
+export interface MonitoringHealth {
+  status: string;
+  uptime_seconds: number;
+  timestamp: string;
+  alerts_enabled: boolean;
+  prometheus_enabled: boolean;
+  metrics_collection_interval: number;
+  alert_check_interval: number;
+  current_metrics: {
+    error_rate: number;
+    latency_p99_ms: number;
+    system_health_score: number;
+    user_adoption_rate: number;
   };
-  alerts?: { recent?: Array<Record<string, unknown>> };
-};
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object";
-}
-
-function normalizeState(raw: unknown): State {
-  const payload = isRecord(raw) ? raw : {};
-  const done = Boolean(payload.done);
-  const actionHistory = Array.isArray(payload.action_history)
-    ? (payload.action_history as ActionHistoryItem[])
-    : [];
-  const rolloutHistory = Array.isArray(payload.rollout_history)
-    ? (payload.rollout_history as number[])
-    : [];
-  const history = Array.isArray(payload.history)
-    ? (payload.history as State["history"])
-    : [];
-
-  return {
-    episode_id: typeof payload.episode_id === "string" ? payload.episode_id : "",
-    step_count: Number(payload.step_count ?? 0),
-    total_reward: Number(payload.total_reward ?? 0),
-    done,
-    is_done: done,
-    scenario_name: typeof payload.scenario_name === "string" ? payload.scenario_name : "unknown",
-    difficulty: typeof payload.difficulty === "string" ? payload.difficulty : "unknown",
-    action_history: actionHistory,
-    rollout_history: rolloutHistory,
-    history,
+  thresholds: {
+    error_rate_threshold: number;
+    latency_threshold_ms: number;
+    health_score_threshold: number;
   };
 }
 
-function normalizeDashboard(raw: unknown): DashboardData {
-  const payload = isRecord(raw) ? raw : {};
-  if ("summary" in payload && isRecord(payload.summary)) {
-    const summary = payload.summary as Record<string, unknown>;
-    const metrics = isRecord(payload.metrics) ? payload.metrics : {};
-    const alerts = Array.isArray(payload.alerts) ? payload.alerts : [];
-    const latencyMetric = isRecord(metrics.latency) ? metrics.latency : {};
-    const errorMetric = isRecord(metrics.error_rate) ? metrics.error_rate : {};
-    const adoptionMetric = isRecord(metrics.adoption) ? metrics.adoption : {};
-
-    return {
-      summary: {
-        health_score: Number(summary.health_score ?? 0),
-        error_rate: Number(summary.error_rate ?? 0),
-        latency_p99_ms: Number(summary.latency_p99_ms ?? 0),
-        uptime_seconds: Number(summary.uptime_seconds ?? 0),
-        status: String(summary.status ?? "unknown"),
-      },
-      metrics: {
-        latency: {
-          current: Number(latencyMetric.current ?? 0),
-          trend: Number(latencyMetric.trend ?? 0),
-        },
-        error_rate: {
-          current: Number(errorMetric.current ?? 0),
-          trend: Number(errorMetric.trend ?? 0),
-        },
-        adoption: {
-          current: Number(adoptionMetric.current ?? 0),
-          trend: Number(adoptionMetric.trend ?? 0),
-        },
-      },
-      alerts: alerts as Array<Record<string, unknown>>,
-    };
-  }
-
-  const monitoring = payload as MonitoringDashboardResponse;
-  const latency = Number(monitoring.metrics?.avg_latency_ms ?? 0);
-  const err = Number(monitoring.metrics?.error_rate ?? 0);
-
-  return {
-    summary: {
-      health_score: Number(monitoring.health?.score ?? 0),
-      error_rate: err,
-      latency_p99_ms: latency,
-      uptime_seconds: Number(monitoring.metrics?.uptime_seconds ?? 0),
-      status: String(monitoring.health?.status ?? "unknown"),
-    },
-    metrics: {
-      latency: { current: latency, trend: 0 },
-      error_rate: { current: err, trend: 0 },
-      adoption: { current: Number(monitoring.metrics?.active_users ?? 0), trend: 0 },
-    },
-    alerts: Array.isArray(monitoring.alerts?.recent) ? monitoring.alerts.recent : [],
-  };
+export interface MonitoringAlert {
+  type?: string;
+  severity?: string;
+  message?: string;
+  details?: Record<string, unknown>;
+  [key: string]: unknown;
 }
 
 export const api = {
@@ -356,14 +279,46 @@ export const api = {
 
   async getState(): Promise<State> {
     try {
-      const state = await this.request<unknown>("/state", { method: "GET" });
-      return normalizeState(state);
+      const rawState = await this.request<unknown>("/state", { method: "GET" });
+      const stateObj = (rawState && typeof rawState === "object") ? (rawState as Record<string, unknown>) : {};
+      
+      // The Python backend serves 'rollout_history' and 'action_history' instead of a singular 'history' array
+      const historyValue = stateObj["history"];
+      const rolloutHistory = stateObj["rollout_history"];
+      const actionHistory = stateObj["action_history"];
+      const observationHistory = stateObj["observation_history"];
+
+      if (Array.isArray(observationHistory) && observationHistory.length > 0) {
+        stateObj["history"] = observationHistory.map((obs: unknown, index: number) => {
+          const actionObject = Array.isArray(actionHistory) && index > 0 ? actionHistory[index - 1] : null;
+          return {
+            observation: obs as Record<string, unknown>,
+            action: actionObject && typeof actionObject === "object" ? actionObject : null,
+            reward: 0,
+          };
+        });
+      } else if (!Array.isArray(historyValue) && Array.isArray(rolloutHistory)) {
+        stateObj["history"] = rolloutHistory.map((obs: unknown, index: number) => {
+          const actionTuple =
+            Array.isArray(actionHistory) && index > 0 ? (actionHistory[index - 1] as unknown) : null;
+          const actionArr = Array.isArray(actionTuple) ? actionTuple : null;
+          const action = actionArr && actionArr.length > 0 && actionArr[0] && typeof actionArr[0] === "object"
+            ? (actionArr[0] as Record<string, unknown>)
+            : null;
+          const reward = actionArr && actionArr.length > 1 ? Number(actionArr[1] ?? 0) : 0;
+          return {
+            observation: obs,
+            action,
+            reward,
+          };
+        });
+      }
+      return stateObj as unknown as State;
     } catch (error) {
       // Environment may not be initialized yet; reset once and retry.
       if (error instanceof Error && /not initialized|400/i.test(error.message)) {
         await this.reset();
-        const state = await this.request<unknown>("/state", { method: "GET" });
-        return normalizeState(state);
+        return this.getState();
       }
       throw error;
     }
@@ -401,6 +356,44 @@ export const api = {
           },
           alerts: [],
         };
+      }
+      throw error;
+    }
+  },
+
+  async getMonitoringHealth(): Promise<MonitoringHealth | null> {
+    try {
+      return this.request<MonitoringHealth>("/monitoring/health", { method: "GET" });
+    } catch (error) {
+      if (error instanceof Error && /(403|monitoring is not enabled)/i.test(error.message)) {
+        return null;
+      }
+      throw error;
+    }
+  },
+
+  async getMonitoringAlerts(): Promise<MonitoringAlert[] | null> {
+    try {
+      const res = await this.request<unknown>("/monitoring/alerts", { method: "GET" });
+      if (Array.isArray(res)) return res as MonitoringAlert[];
+      if (res && typeof res === "object" && Array.isArray((res as { alerts?: unknown }).alerts)) {
+        return (res as { alerts: MonitoringAlert[] }).alerts;
+      }
+      return [];
+    } catch (error) {
+      if (error instanceof Error && /(403|monitoring is not enabled)/i.test(error.message)) {
+        return null;
+      }
+      throw error;
+    }
+  },
+
+  async getPrometheusMetrics(): Promise<string | null> {
+    try {
+      return this.request<string>("/metrics", { method: "GET" });
+    } catch (error) {
+      if (error instanceof Error && /(403|monitoring is not enabled)/i.test(error.message)) {
+        return null;
       }
       throw error;
     }

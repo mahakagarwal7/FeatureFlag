@@ -14,32 +14,11 @@ import {
   Area
 } from "recharts";
 
-import { useEffect, useState } from "react";
-import { api, State } from "@/lib/api";
+import { useEnv } from "@/components/env/env-provider";
 import { cn } from "@/lib/utils";
 
 export default function AIDecisionsPage() {
-  const [state, setState] = useState<State | null>(null);
-
-  const fetchState = async () => {
-    try {
-      const s = await api.getState();
-      setState(s);
-    } catch (error) {
-      console.error("Failed to fetch AI state:", error);
-    }
-  };
-
-  useEffect(() => {
-    const initialFetch = setTimeout(() => {
-      void fetchState();
-    }, 0);
-    const interval = setInterval(fetchState, 5000);
-    return () => {
-      clearTimeout(initialFetch);
-      clearInterval(interval);
-    };
-  }, []);
+  const { state } = useEnv();
 
   const history = state?.history || [];
   const rewardData = history.map((step, index: number) => ({
@@ -55,8 +34,35 @@ export default function AIDecisionsPage() {
   const totalReward = state?.total_reward ?? 0;
   const currentStep = state?.step_count ?? 0;
   
+  const getActionField = (action: unknown, key: string): unknown => {
+    if (!action || typeof action !== "object") return undefined;
+    return (action as Record<string, unknown>)[key];
+  };
+
+  const getActionTypeString = (action: unknown): string => {
+    const v = getActionField(action, "action_type");
+    return typeof v === "string" ? v : "UNKNOWN";
+  };
+
+  const getActionReasonString = (action: unknown): string => {
+    const v = getActionField(action, "reason");
+    return typeof v === "string" ? v : "Observing system baseline...";
+  };
+
   // Get recent decisions from history
-  const recentDecisions = [...history].reverse().slice(0, 10).filter(h => h.action);
+  const recentDecisions = [...history]
+    .reverse()
+    .filter((h): h is typeof h & { action: Record<string, unknown> } => Boolean(h.action))
+    .slice(0, 10);
+  const lastActionType = (() => {
+    const a = recentDecisions[0]?.action;
+    const t = getActionTypeString(a);
+    return t === "UNKNOWN" ? "WAITING" : t;
+  })();
+
+  const lastReason = (() => {
+    return getActionReasonString(recentDecisions[0]?.action);
+  })();
 
   return (
     <div className="flex-1 space-y-6 p-8">
@@ -90,7 +96,7 @@ export default function AIDecisionsPage() {
           </CardHeader>
           <CardContent>
             <div className="h-[350px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height={350} minHeight={350}>
                 <AreaChart data={rewardData.map((d, i) => ({ ...d, rollout: rolloutData[i]?.rollout }))}>
                   <defs>
                     <linearGradient id="colorReward" x1="0" y1="0" x2="0" y2="1">
@@ -161,11 +167,11 @@ export default function AIDecisionsPage() {
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-[10px] font-bold text-muted-foreground">LAST ACTION</span>
                     <Badge variant="outline" className="text-[10px] bg-primary/5 text-primary border-primary/20">
-                       {recentDecisions[0]?.action?.action_type || "WAITING"}
+                       {lastActionType}
                     </Badge>
                   </div>
                   <p className="text-xs leading-relaxed italic text-muted-foreground">
-                    &quot;{recentDecisions[0]?.action?.reason || "Observing system baseline..."}&quot;
+                    &quot;{lastReason}&quot;
                   </p>
                </div>
             </CardContent>
@@ -204,13 +210,13 @@ export default function AIDecisionsPage() {
                           <div className="flex items-center gap-3">
                              <Badge className={cn(
                                "text-[10px] font-bold",
-                               actionType.includes("INCREASE") ? "bg-green-100 text-green-700 hover:bg-green-100" :
-                               actionType.includes("ROLLBACK") || actionType.includes("HALT") ? "bg-red-100 text-red-700 hover:bg-red-100" :
+                               getActionTypeString(step.action).includes("INCREASE") ? "bg-green-100 text-green-700 hover:bg-green-100" :
+                               getActionTypeString(step.action).includes("ROLLBACK") || getActionTypeString(step.action).includes("HALT") ? "bg-red-100 text-red-700 hover:bg-red-100" :
                                "bg-blue-100 text-blue-700 hover:bg-blue-100"
                              )}>
-                                {actionType}
+                                {getActionTypeString(step.action)}
                              </Badge>
-                             <span className="text-sm font-bold">{targetPercentage}% Rollout Target</span>
+                             <span className="text-sm font-bold">{String(getActionField(step.action, "target_percentage") ?? "—")}% Rollout Target</span>
                           </div>
                           <div className="flex items-center gap-2">
                              <Badge variant="outline" className={cn(
@@ -224,13 +230,13 @@ export default function AIDecisionsPage() {
                        <div className="flex items-start gap-2 bg-muted/30 p-2.5 rounded-lg">
                           <MessageSquare className="h-3 w-3 text-muted-foreground mt-1 shrink-0" />
                           <p className="text-xs text-muted-foreground leading-normal">
-                             {reason}
+                             {getActionReasonString(step.action)}
                           </p>
                        </div>
                        <div className="flex items-center gap-4 pt-1">
                           <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
                              <Activity className="h-3 w-3" />
-                             Health: {((step.observation?.system_health_score ?? 0) * 100).toFixed(1)}%
+                             Health: {(((step.observation?.system_health_score ?? 0) * 100)).toFixed(1)}%
                           </div>
                           <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
                              <Zap className="h-3 w-3" />

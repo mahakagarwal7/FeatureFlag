@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { api, State, Observation } from "@/lib/api";
+import { api, Observation } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { 
@@ -11,7 +11,6 @@ import {
   Users, 
   Target, 
   ShieldAlert,
-  MessageSquare,
   TrendingUp
 } from "lucide-react";
 import { AnimatedToggle } from "@/components/ui/animated-toggle";
@@ -20,53 +19,41 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { cn } from "@/lib/utils";
+import { useEnv } from "@/components/env/env-provider";
 
 export default function FlagDetailPage() {
   const params = useParams();
   const router = useRouter();
   const id = params.id as string;
   
-  const [state, setState] = useState<State | null>(null);
+  const { state } = useEnv();
   const [isOn, setIsOn] = useState(true);
   const [rollout, setRollout] = useState([25]);
   const [hasChanges, setHasChanges] = useState(false);
   const [message, setMessage] = useState<string>("");
 
-  const fetchState = async () => {
-    try {
-      const s = await api.getState();
-      setState(s);
-      
-      const history = s.history || [];
-      const lastHistory = history.length > 0 ? history[history.length - 1] : null;
-      const observation = lastHistory?.observation;
-      
-      if (observation && observation.feature_name === id) {
-        setIsOn(!s.is_done);
-        setRollout([observation.current_rollout_percentage]);
-      }
-    } catch (error) {
-      console.error("Failed to fetch flag detail:", error);
-    }
-  };
-
   useEffect(() => {
-    const initialFetch = setTimeout(() => {
-      void fetchState();
-    }, 0);
-    const interval = setInterval(fetchState, 5000);
-    return () => {
-      clearTimeout(initialFetch);
-      clearInterval(interval);
-    };
-  }, [id]);
+    const lastObs = state?.history?.[state.history.length - 1]?.observation;
+    if (lastObs && lastObs.feature_name === id) {
+      const timeout = setTimeout(() => {
+        setIsOn(!(state?.is_done ?? false));
+        setRollout([lastObs.current_rollout_percentage]);
+        setHasChanges(false);
+      }, 0);
+      return () => clearTimeout(timeout);
+    }
+  }, [id, state]);
 
   const lastObs: Observation | undefined = state?.history?.[state.history.length - 1]?.observation;
   const isBackendFlag = lastObs?.feature_name === id;
-  const patternRisk = Number(lastObs?.extra_context?.pattern_risk ?? 0);
-  const anomaly = (lastObs?.extra_context?.anomaly ?? null) as { is_anomaly?: boolean } | null;
-  const benchmarking = (lastObs?.extra_context?.benchmarking ?? null) as { percentile?: number } | null;
-  const percentile = Number(benchmarking?.percentile ?? 0);
+  const extra = lastObs?.extra_context as Record<string, unknown> | undefined;
+  const patternRisk = Number(extra?.pattern_risk ?? 0);
+  const anomaly = extra?.anomaly;
+  const anomalyObj = anomaly && typeof anomaly === "object" ? (anomaly as Record<string, unknown>) : undefined;
+  const isAnomaly = Boolean(anomalyObj?.is_anomaly);
+  const benchmarking = extra?.benchmarking && typeof extra.benchmarking === "object"
+    ? (extra.benchmarking as Record<string, unknown>)
+    : undefined;
 
   const handleRolloutChange = (val: number | number[] | readonly number[]) => {
     const newVal = typeof val === 'number' ? val : val[0];
@@ -102,9 +89,10 @@ export default function FlagDetailPage() {
       });
       
       setHasChanges(false);
-      fetchState();
+      setMessage("Saved.");
     } catch (error) {
       console.error("Failed to save changes:", error);
+      setMessage(error instanceof Error ? error.message : "Save failed");
     }
   };
 
@@ -135,6 +123,15 @@ export default function FlagDetailPage() {
           )}
         </div>
       </div>
+
+      {message ? (
+        <div className={cn(
+          "rounded-lg border border-border/50 bg-card/50 px-4 py-3 text-sm",
+          message.toLowerCase().includes("fail") ? "text-destructive" : "text-muted-foreground"
+        )}>
+          {message}
+        </div>
+      ) : null}
 
       <div className="grid gap-6 md:grid-cols-3">
         <div className="md:col-span-2 space-y-6">
@@ -256,14 +253,19 @@ export default function FlagDetailPage() {
             <CardContent className="space-y-4">
               <div className="flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">Pattern Risk</span>
-                <span className="font-bold">{(patternRisk * 100).toFixed(0)}%</span>
+                <span className="font-bold">
+                  {(patternRisk * 100).toFixed(0)}%
+                </span>
               </div>
-              <Progress value={patternRisk * 100} className="h-1.5" />
+              <Progress
+                value={patternRisk * 100}
+                className="h-1.5"
+              />
               
               <div className="pt-4 border-t mt-4">
                 <div className="flex items-center justify-between text-xs mb-2">
                   <span className="text-muted-foreground font-medium uppercase">Active Anomaly</span>
-                  {anomaly?.is_anomaly ? (
+                  {isAnomaly ? (
                     <Badge variant="destructive" className="h-4 text-[9px]">CRITICAL</Badge>
                   ) : (
                     <Badge variant="outline" className="h-4 text-[9px] text-green-600 border-green-200">CLEAR</Badge>
@@ -282,7 +284,7 @@ export default function FlagDetailPage() {
             </CardHeader>
             <CardContent>
                <div className="text-center py-2">
-                  <span className="text-3xl font-bold">{(percentile * 100).toFixed(0)}th</span>
+                  <span className="text-3xl font-bold">{(Number(benchmarking?.percentile ?? 0) * 100).toFixed(0)}th</span>
                   <p className="text-[10px] text-muted-foreground mt-1">Percentile Performance</p>
                </div>
             </CardContent>
