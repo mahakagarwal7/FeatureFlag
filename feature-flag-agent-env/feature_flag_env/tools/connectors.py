@@ -8,7 +8,6 @@ by higher-level lifecycle handlers (Tools) to enforce backward compatibility and
 
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional
-import time
 
 
 class Connector(ABC):

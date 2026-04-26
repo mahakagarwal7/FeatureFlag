@@ -7,32 +7,41 @@ import numpy as np
 from feature_flag_env.models import FeatureFlagAction, FeatureFlagObservation
 from agents.replay_buffer import ReplayBuffer
 
+TORCH_AVAILABLE = True
 try:
     import torch
     import torch.nn as nn
     import torch.optim as optim
     from torch.nn.utils import clip_grad_norm_
-except ImportError as exc:
-    raise ImportError(
-        "PyTorch is required for RLAgent. Install with: pip install torch"
-    ) from exc
+except ImportError:
+    TORCH_AVAILABLE = False
+    torch = None
+    nn = None
+    optim = None
+    clip_grad_norm_ = None
 
 
-class DQN(nn.Module):
-    def __init__(self, state_dim: int, action_dim: int):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(state_dim, 128),
-            nn.ReLU(),
-            nn.Linear(128, 64),
-            nn.ReLU(),
-            nn.Linear(64, 32),
-            nn.ReLU(),
-            nn.Linear(32, action_dim),
-        )
+if TORCH_AVAILABLE:
+    class DQN(nn.Module):
+        def __init__(self, state_dim: int, action_dim: int):
+            super().__init__()
+            self.net = nn.Sequential(
+                nn.Linear(state_dim, 128),
+                nn.ReLU(),
+                nn.Linear(128, 64),
+                nn.ReLU(),
+                nn.Linear(64, 32),
+                nn.ReLU(),
+                nn.Linear(32, action_dim),
+            )
 
-    def forward(self, x):
-        return self.net(x)
+        def forward(self, x):
+            return self.net(x)
+else:
+    class DQN:
+        def __init__(self, state_dim: int, action_dim: int):
+            self.state_dim = state_dim
+            self.action_dim = action_dim
 
 
 class RLAgent:
@@ -139,14 +148,22 @@ class RLAgent:
         self.action_mask_events = 0
         self.action_safety_overrides = 0
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.policy_net = DQN(self.state_dim, self.action_dim).to(self.device)
-        self.target_net = DQN(self.state_dim, self.action_dim).to(self.device)
-        self.target_net.load_state_dict(self.policy_net.state_dict())
-        self.target_net.eval()
+        self.torch_available = TORCH_AVAILABLE
+        if self.torch_available:
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            self.policy_net = DQN(self.state_dim, self.action_dim).to(self.device)
+            self.target_net = DQN(self.state_dim, self.action_dim).to(self.device)
+            self.target_net.load_state_dict(self.policy_net.state_dict())
+            self.target_net.eval()
+            self.optimizer = optim.Adam(self.policy_net.parameters(), lr=lr)
+            self.loss_fn = nn.MSELoss()
+        else:
+            self.device = "cpu"
+            self.policy_net = None
+            self.target_net = None
+            self.optimizer = None
+            self.loss_fn = None
 
-        self.optimizer = optim.Adam(self.policy_net.parameters(), lr=lr)
-        self.loss_fn = nn.MSELoss()
         self.replay_buffer = ReplayBuffer(capacity=buffer_capacity)
         self.external_transition_mode = False
 
@@ -368,6 +385,9 @@ class RLAgent:
         if self.training and random.random() < self.epsilon:
             return int(random.choice(allowed_actions))
 
+        if not self.torch_available:
+            return int(random.choice(allowed_actions))
+
         with torch.no_grad():
             state_tensor = torch.from_numpy(state).float().unsqueeze(0).to(self.device)
             q_values = self.policy_net(state_tensor)
@@ -413,6 +433,8 @@ class RLAgent:
         )
 
     def _optimize_model(self):
+        if not self.torch_available:
+            return None
         if len(self.replay_buffer) < self.batch_size:
             return None
 
@@ -557,6 +579,8 @@ class RLAgent:
         self.last_action = None
 
     def save_model(self, model_path: Optional[str] = None):
+        if not self.torch_available:
+            return
         path = model_path or self.model_path
         os.makedirs(os.path.dirname(path), exist_ok=True)
         torch.save(
@@ -570,6 +594,8 @@ class RLAgent:
         )
 
     def load_model(self, model_path: Optional[str] = None):
+        if not self.torch_available:
+            return
         path = model_path or self.model_path
         checkpoint = torch.load(path, map_location=self.device)
 

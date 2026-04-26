@@ -122,9 +122,12 @@ export interface State {
   episode_id: string;
   step_count: number;
   total_reward: number;
+  done?: boolean;
   is_done: boolean;
   scenario_name: string;
   difficulty: string;
+  action_history?: ActionHistoryItem[];
+  rollout_history?: number[];
   history: Array<{
     observation?: Observation;
     reward?: number;
@@ -323,7 +326,8 @@ export const api = {
 
   async getDashboard(): Promise<DashboardData> {
     try {
-      return this.request<DashboardData>("/monitoring/dashboard", { method: "GET" });
+      const dashboard = await this.request<unknown>("/monitoring/dashboard", { method: "GET" });
+      return normalizeDashboard(dashboard);
     } catch (error) {
       // Monitoring can be disabled on backend; fall back to core state/health data.
       if (error instanceof Error && /(403|monitoring is not enabled)/i.test(error.message)) {

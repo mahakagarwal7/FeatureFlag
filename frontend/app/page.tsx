@@ -16,7 +16,6 @@ import {
 import { 
   Area, 
   AreaChart, 
-  ResponsiveContainer, 
   Tooltip, 
   XAxis, 
   YAxis,
@@ -27,6 +26,7 @@ import {
 } from "recharts";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { useMemo } from "react";
 import { Observation } from "@/lib/api";
@@ -37,6 +37,14 @@ import { useEnv } from "@/components/env/env-provider";
 const Dashboard = () => {
   const { dashboard: data, state, connectionState, connectionText } = useEnv();
   const loading = useMemo(() => connectionState === "checking" && !data && !state, [connectionState, data, state]);
+
+  useEffect(() => {
+    let simInterval: NodeJS.Timeout;
+    if (isSimulating) {
+      simInterval = setInterval(runSimulationStep, 2000);
+    }
+    return () => clearInterval(simInterval);
+  }, [isSimulating, state]);
 
   const lastObs: Observation | undefined = state?.history?.[state.history.length - 1]?.observation;
   
@@ -79,23 +87,42 @@ const Dashboard = () => {
           <h1 className="text-3xl font-bold tracking-tight">Enterprise Overview</h1>
           <p className="text-muted-foreground mt-1">Real-time autonomous deployment monitoring.</p>
         </div>
-        <Badge
-          variant="outline"
-          className={cn(
-            "px-4 py-1.5 rounded-full border-2",
-            connectionState === "connected"
-              ? "border-green-500/30 text-green-600 bg-green-50"
-              : connectionState === "disconnected"
-              ? "border-destructive/30 text-destructive bg-destructive/5"
-              : ""
-          )}
-        >
-          <div className={cn(
-            "w-2 h-2 rounded-full mr-2 animate-pulse",
-            connectionState === "connected" ? "bg-green-500" : "bg-destructive"
-          )} />
-          {loading ? "Syncing..." : connectionText}
-        </Badge>
+        <div className="flex items-center gap-3">
+          <Button 
+            variant={isSimulating ? "destructive" : "default"} 
+            size="sm" 
+            onClick={() => setIsSimulating(!isSimulating)}
+            className="rounded-full gap-2 px-6"
+          >
+            {isSimulating ? <Zap className="h-4 w-4 animate-pulse" /> : <Zap className="h-4 w-4" />}
+            {isSimulating ? "Stop Autonomous Mode" : "Start Autonomous Mode"}
+          </Button>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={() => { api.reset().then(() => fetchData()); }}
+            className="rounded-full"
+          >
+            Reset Session
+          </Button>
+          <Badge
+            variant="outline"
+            className={cn(
+              "px-4 py-1.5 rounded-full border-2",
+              connectionState === "connected"
+                ? "border-green-500/30 text-green-600 bg-green-50"
+                : connectionState === "disconnected"
+                ? "border-destructive/30 text-destructive bg-destructive/5"
+                : ""
+            )}
+          >
+            <div className={cn(
+              "w-2 h-2 rounded-full mr-2 animate-pulse",
+              connectionState === "connected" ? "bg-green-500" : "bg-destructive"
+            )} />
+            {loading ? "Syncing..." : connectionText}
+          </Badge>
+        </div>
       </div>
 
       {/* Primary Metrics */}
@@ -204,11 +231,11 @@ const Dashboard = () => {
 
       <div className="grid gap-6 md:grid-cols-7">
         {/* Main Traffic Chart */}
-        <Card className="md:col-span-4 border-border/50 bg-card/50 shadow-sm">
+        <Card className="md:col-span-4 border-border/50 bg-card/50 shadow-sm overflow-hidden">
           <CardHeader>
             <CardTitle className="flex items-center justify-between">
               Evaluation Traffic
-              <Badge variant="outline" className="font-normal text-xs">
+              <Badge variant="outline" className="font-normal text-xs bg-background/50">
                 Live Stream
               </Badge>
             </CardTitle>
@@ -219,21 +246,37 @@ const Dashboard = () => {
                 <AreaChart data={state?.history?.map(h => ({ 
                   time: h.observation?.time_step, 
                   rollout: h.observation?.current_rollout_percentage,
-                  error: (h.observation?.error_rate ?? 0) * 10000 // scaling for visibility
-                })) || []}>
-                  <defs>
-                    <linearGradient id="colorRollout" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="var(--primary)" stopOpacity={0.2}/>
-                      <stop offset="95%" stopColor="var(--primary)" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" opacity={0.5} />
-                  <XAxis dataKey="time" stroke="var(--muted-foreground)" fontSize={10} tickLine={false} axisLine={false} />
-                  <YAxis stroke="var(--muted-foreground)" fontSize={10} tickLine={false} axisLine={false} />
-                  <Tooltip />
-                  <Area type="monotone" dataKey="rollout" stroke="var(--primary)" strokeWidth={2} fill="url(#colorRollout)" />
-                </AreaChart>
-              </ResponsiveContainer>
+                  error: (h.observation?.error_rate ?? 0) * 100
+                })) : [
+                  { time: -2, rollout: 5, error: 0.1 },
+                  { time: -1, rollout: 5, error: 0.15 },
+                  { time: 0, rollout: 5, error: 0.1 }
+                ]}
+                margin={{ top: 20, right: 30, left: 0, bottom: 0 }}
+              >
+                <defs>
+                  <linearGradient id="colorRollout" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.4}/>
+                    <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#222" />
+                <XAxis dataKey="time" stroke="#444" fontSize={10} tickLine={false} axisLine={false} />
+                <YAxis stroke="#444" fontSize={10} tickLine={false} axisLine={false} domain={[0, 100]} />
+                <Tooltip 
+                  contentStyle={{ backgroundColor: '#111', border: '1px solid #333', borderRadius: '8px' }} 
+                  itemStyle={{ color: '#8b5cf6' }}
+                />
+                <Area 
+                  type="monotone" 
+                  dataKey="rollout" 
+                  stroke="#a78bfa" 
+                  strokeWidth={3} 
+                  fillOpacity={1} 
+                  fill="url(#colorRollout)" 
+                  animationDuration={1000}
+                />
+              </AreaChart>
             </div>
           </CardContent>
         </Card>
@@ -296,9 +339,16 @@ const Dashboard = () => {
 
          <Card className="border-border/50 bg-card/50 col-span-2">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium flex items-center gap-2">
-                <ShieldAlert className="h-4 w-4 text-red-500" />
-                Active Alerts & Incidents
+              <CardTitle className="text-sm font-medium flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <ShieldAlert className="h-4 w-4 text-red-500" />
+                  Active Alerts & Incidents
+                </div>
+                <div className="flex items-center gap-4">
+                   <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground uppercase font-bold">
+                      <div className="w-1.5 h-1.5 rounded-full bg-green-500" /> Slack
+                   </div>
+                </div>
               </CardTitle>
             </CardHeader>
             <CardContent>

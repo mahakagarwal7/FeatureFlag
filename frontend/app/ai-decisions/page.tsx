@@ -193,6 +193,11 @@ export default function AIDecisionsPage() {
           <div className="space-y-0">
              {recentDecisions.length > 0 ? (
                recentDecisions.map((step, i) => (
+                 (() => {
+                   const actionType = step.action?.action_type ?? "MAINTAIN";
+                   const targetPercentage = step.action?.target_percentage ?? 0;
+                   const reason = step.action?.reason ?? "No reasoning provided.";
+                   return (
                  <div key={i} className="flex gap-4 border-b border-border/30 last:border-0 py-4 group">
                     <div className="flex flex-col items-center">
                        <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center text-[10px] font-bold">
@@ -240,6 +245,8 @@ export default function AIDecisionsPage() {
                        </div>
                     </div>
                  </div>
+                   );
+                 })()
                ))
              ) : (
                <div className="py-20 text-center text-muted-foreground flex flex-col items-center gap-4">

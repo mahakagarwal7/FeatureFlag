@@ -8,6 +8,7 @@ import {
   Flag,
   Beaker,
   BrainCircuit,
+  Activity,
   Settings,
 } from "lucide-react";
 import { motion } from "framer-motion";
@@ -32,6 +33,11 @@ const sidebarNavItems = [
     title: "AI Decisions",
     href: "/ai-decisions",
     icon: BrainCircuit,
+  },
+  {
+    title: "Integrations",
+    href: "/integrations",
+    icon: Activity,
   },
   {
     title: "Settings",
