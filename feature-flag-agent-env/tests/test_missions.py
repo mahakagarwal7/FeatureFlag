@@ -23,7 +23,7 @@ def test_mission_library():
     assert "quick_ui_update" in missions
     assert "database_migration_mission" in missions
     print(f"   ✅ {len(missions)} missions available")
-    return True
+    assert True
 
 
 def test_get_mission_deep_copy():
@@ -34,7 +34,7 @@ def test_get_mission_deep_copy():
     m1.phases[0].name = "MODIFIED"
     assert m2.phases[0].name != "MODIFIED", "Missions should be independent copies"
     print("   ✅ Deep copy confirmed")
-    return True
+    assert True
 
 
 def test_phase_advancement():
@@ -69,7 +69,7 @@ def test_phase_advancement():
     assert tracker.current_phase.name == "phase2"
 
     print("   ✅ Phase advanced correctly")
-    return True
+    assert True
 
 
 def test_phase_failure_error():
@@ -88,7 +88,7 @@ def test_phase_failure_error():
     assert result["phase_failed"], "Phase should fail on high errors"
     assert tracker.current_phase.status == PhaseStatus.FAILED
     print("   ✅ Phase failed correctly on errors")
-    return True
+    assert True
 
 
 def test_phase_failure_steps():
@@ -107,7 +107,7 @@ def test_phase_failure_steps():
     result = tracker.step(rollout_pct=10.0, error_rate=0.01)  # step 2 = max
     assert result["phase_failed"], "Phase should fail when steps exhausted without target"
     print("   ✅ Phase failed correctly on step limit")
-    return True
+    assert True
 
 
 def test_mission_completion():
@@ -135,7 +135,7 @@ def test_mission_completion():
     assert result["mission_complete"]
     assert tracker.is_mission_complete
     print("   ✅ Mission completed")
-    return True
+    assert True
 
 
 def test_stakeholder_gate():
@@ -159,7 +159,7 @@ def test_stakeholder_gate():
     result = tracker.step(rollout_pct=20.0, error_rate=0.01, stakeholder_approval=True)
     assert result["phase_advanced"], "Should advance with approval"
     print("   ✅ Stakeholder gate works")
-    return True
+    assert True
 
 
 def test_info_dict():
@@ -178,7 +178,7 @@ def test_info_dict():
     assert "total_phases" in info
     assert info["total_phases"] == 2
     print(f"   ✅ Info dict: {info}")
-    return True
+    assert True
 
 
 # --- Main ------------------------------------------------------------------

@@ -70,7 +70,7 @@ def test_stakeholder_satisfaction():
     assert r == 0.0
 
     print("   ✅ Passed")
-    return True
+    assert True
 
 
 def test_milestone():
@@ -80,7 +80,7 @@ def test_milestone():
     assert milestone_reward(False) == 0.0, "Should give 0 when no advance"
     assert milestone_reward(True, phase_reward_weight=2.0) == 1.0, "Should scale with weight"
     print("   ✅ Passed")
-    return True
+    assert True
 
 
 def test_phase_progress():
@@ -92,7 +92,7 @@ def test_phase_progress():
     r_full = phase_progress_reward(1.0)
     assert abs(r_full - 0.2) < 0.01, f"Expected ~0.2, got {r_full}"
     print("   ✅ Passed")
-    return True
+    assert True
 
 
 def test_tool_usage():
@@ -103,7 +103,7 @@ def test_tool_usage():
     assert tool_usage_reward(5) == 0.25
     assert tool_usage_reward(10) == 0.25 # Capped
     print("   ✅ Passed")
-    return True
+    assert True
 
 def test_communication():
     """Slack bonus should trigger and handle caps."""
@@ -123,7 +123,7 @@ def test_communication():
     assert r == 0.0
     
     print("   ✅ Passed")
-    return True
+    assert True
 
 def test_exploration():
     """Exploration bonus should reward novelty within 10 step window."""
@@ -143,7 +143,7 @@ def test_exploration():
     assert exploration_reward(action_maint, history) == 0.0
     
     print("   ✅ Passed")
-    return True
+    assert True
 
 
 # --- Composite reward -------------------------------------------------------
@@ -172,7 +172,7 @@ def test_composite_backward_compatible():
     assert abs((base + 0.05) - extended) < 0.01, \
         f"Extended ({extended:.3f}) should match base ({base:.3f}) + 0.05 exploration bonus"
     print(f"   ✅ Base={base:.3f}, Extended={extended:.3f}")
-    return True
+    assert True
 
 
 def test_composite_with_all_components():
@@ -205,7 +205,7 @@ def test_composite_with_all_components():
     assert extended > base, \
         f"Extended ({extended:.3f}) should be higher than base ({base:.3f}) with positive extras"
     print(f"   ✅ Base={base:.3f}, Extended={extended:.3f}")
-    return True
+    assert True
 
 
 # --- Main ------------------------------------------------------------------

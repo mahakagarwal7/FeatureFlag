@@ -47,6 +47,33 @@ python -m feature_flag_env.server.app
 
 ---
 
+## 🤗 Connect To Hugging Face
+
+Set these variables before running the LLM or hybrid agents:
+
+```bash
+# Force Hugging Face provider
+export LLM_PROVIDER=hf
+
+# Hugging Face token and endpoint
+export HF_TOKEN=hf_xxxxxxxxxxxxx
+export HF_API_BASE_URL=https://router.huggingface.co/v1
+
+# Choose a Hugging Face model
+export MODEL_NAME=Qwen/Qwen2.5-7B-Instruct
+```
+
+Then run:
+
+```bash
+python inference.py --agent llm --episodes 3
+python inference.py --agent hybrid --episodes 3
+```
+
+If `LLM_PROVIDER=auto`, the agent now auto-selects Hugging Face when only `HF_TOKEN` is present.
+
+---
+
 ## 📈 Training Evidence (Task1)
 
 To include training progress in submission artifacts:

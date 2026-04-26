@@ -68,7 +68,7 @@ def test_task1_grader():
     print(f"   ✅ High error score: {score_fail:.3f}")
     assert score_fail < score, "High errors should score lower"
     
-    return True
+    assert True
 
 
 def test_task2_grader():
@@ -129,7 +129,7 @@ def test_task2_grader():
     if incident_responded:
         print(f"   ✅ Incident response detected in trajectory")
     
-    return True
+    assert True
 
 
 def test_task3_grader():
@@ -150,7 +150,7 @@ def test_task3_grader():
     print(f"   ✅ Multi-objective score: {score:.3f}")
     assert score > 0.6, "Good performance should score well"
     
-    return True
+    assert True
 
 
 def main():

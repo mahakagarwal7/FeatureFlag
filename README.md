@@ -53,3 +53,38 @@ python inference.py --agent baseline --episodes 3
 # Start server
 python -m feature_flag_env.server.app
 ```
+
+---
+
+## 🤗 Connect To Hugging Face
+
+Use Hugging Face Inference Router with the built-in LLM agent integration:
+
+```bash
+export LLM_PROVIDER=hf
+export HF_TOKEN=hf_xxxxxxxxxxxxx
+export HF_API_BASE_URL=https://router.huggingface.co/v1
+export MODEL_NAME=Qwen/Qwen2.5-7B-Instruct
+```
+
+Run inference:
+
+```bash
+python inference.py --agent llm --episodes 3
+```
+
+`LLM_PROVIDER=auto` also works and now auto-selects Hugging Face when only `HF_TOKEN` is configured.
+
+---
+
+## 🚀 Deploy To Hugging Face Space
+
+Full deployment guide:
+
+- See `DEPLOY_TO_HUGGINGFACE.md`
+
+Quick deploy from PowerShell:
+
+```powershell
+./scripts/deploy_to_hf.ps1 -SpaceId "your-username/feature-flag-agent-env"
+```

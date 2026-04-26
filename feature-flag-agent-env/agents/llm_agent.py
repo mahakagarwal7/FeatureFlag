@@ -4,6 +4,7 @@ import ast
 import time
 import sys
 from pathlib import Path
+import httpx
 
 try:
     from dotenv import load_dotenv
@@ -29,14 +30,38 @@ if load_dotenv is not None:
 
 class LLMAgent:
     def __init__(self, model: str = ""):
-        self.model = model or os.getenv("MODEL_NAME", "gpt-4o-mini")
+        requested_provider = os.getenv("LLM_PROVIDER", "auto").strip().lower()
+        if requested_provider not in {"auto", "openai", "hf", "huggingface"}:
+            requested_provider = "auto"
+
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        generic_api_key = os.getenv("API_KEY")
+        hf_token = os.getenv("HF_TOKEN")
+
+        # Provider selection: prefer Hugging Face when only HF_TOKEN is configured.
+        if requested_provider in {"hf", "huggingface"}:
+            self.provider = "hf"
+        elif requested_provider == "openai":
+            self.provider = "openai"
+        else:
+            self.provider = "hf" if hf_token and not (openai_api_key or generic_api_key) else "openai"
+
+        default_model = "Qwen/Qwen2.5-7B-Instruct" if self.provider == "hf" else "gpt-4o-mini"
+        self.model = model or os.getenv("MODEL_NAME", default_model)
+
         self.api_base_url = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
-        # Hackathon validator injects API_KEY and API_BASE_URL for proxy metering.
-        self.api_key = (
-            os.getenv("OPENAI_API_KEY")
-            or os.getenv("API_KEY")
-            or os.getenv("HF_TOKEN")
+        hf_api_base_url = os.getenv("HF_API_BASE_URL", "https://router.huggingface.co/v1")
+        self.hf_chat_completions_url = os.getenv(
+            "HF_CHAT_COMPLETIONS_URL",
+            f"{hf_api_base_url.rstrip('/')}/chat/completions",
         )
+
+        # Hackathon validator may inject API_KEY and API_BASE_URL for proxy metering.
+        if self.provider == "hf":
+            self.api_key = hf_token or generic_api_key or openai_api_key
+        else:
+            self.api_key = openai_api_key or generic_api_key or hf_token
+
         self.timeout_seconds = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "20"))
         self.max_retries = int(os.getenv("OPENAI_MAX_RETRIES", "2"))
         self.retry_backoff_seconds = float(os.getenv("OPENAI_RETRY_BACKOFF_SECONDS", "1.5"))
@@ -53,23 +78,28 @@ class LLMAgent:
             self.use_baseline = True
         else:
             self.use_baseline = False
-            try:
-                from openai import OpenAI
-                self.client = OpenAI(
-                    api_key=self.api_key,
-                    base_url=self.api_base_url,
-                    timeout=self.timeout_seconds,
-                )
-            except ImportError:
-                print("WARNING: openai package not installed. Using fallback.", file=sys.stderr)
-                self.use_baseline = True
-            except Exception as exc:
-                print(f"WARNING: Failed to initialize OpenAI client: {exc}. Using fallback.", file=sys.stderr)
-                self.use_baseline = True
+            self.client = None
+            if self.provider == "openai":
+                try:
+                    from openai import OpenAI
+                    self.client = OpenAI(
+                        api_key=self.api_key,
+                        base_url=self.api_base_url,
+                        timeout=self.timeout_seconds,
+                    )
+                except ImportError:
+                    print("WARNING: openai package not installed. Using fallback.", file=sys.stderr)
+                    self.use_baseline = True
+                except Exception as exc:
+                    print(f"WARNING: Failed to initialize OpenAI client: {exc}. Using fallback.", file=sys.stderr)
+                    self.use_baseline = True
 
         if self.debug:
             status = "enabled" if not self.use_baseline else "fallback"
-            print(f"[LLM DEBUG] startup status={status}, timeout={self.timeout_seconds}s", file=sys.stderr)
+            print(
+                f"[LLM DEBUG] startup status={status}, provider={self.provider}, timeout={self.timeout_seconds}s",
+                file=sys.stderr,
+            )
 
     def _parse_llm_json(self, content: str):
         text = (content or "").strip()
@@ -175,6 +205,57 @@ class LLMAgent:
             or "temporar" in text
         )
 
+    def _call_openai_completion(self, prompt: str):
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": "You are a rollout controller. Return strict JSON only."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            response_format={"type": "json_object"},
+        )
+        return response.choices[0].message.content
+
+    def _call_hf_completion(self, prompt: str):
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": "You are a rollout controller. Return strict JSON only."},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.7,
+        }
+
+        response = httpx.post(
+            self.hf_chat_completions_url,
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=self.timeout_seconds,
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        choices = data.get("choices") if isinstance(data, dict) else None
+        if choices:
+            message = choices[0].get("message", {})
+            content = message.get("content")
+            if content:
+                return content
+
+        if isinstance(data, list) and data and isinstance(data[0], dict):
+            generated_text = data[0].get("generated_text")
+            if generated_text:
+                return generated_text
+
+        if isinstance(data, dict) and data.get("generated_text"):
+            return data["generated_text"]
+
+        raise ValueError("Unexpected Hugging Face response format")
+
     def decide(self, observation: FeatureFlagObservation, history):
         if self.use_baseline:
             if self.debug:
@@ -210,15 +291,10 @@ Respond with JSON only (no markdown, no prose):
             last_exc: Exception | None = None
             for attempt in range(self.max_retries + 1):
                 try:
-                    response = self.client.chat.completions.create(
-                        model=self.model,
-                        messages=[
-                            {"role": "system", "content": "You are a rollout controller. Return strict JSON only."},
-                            {"role": "user", "content": prompt}
-                        ],
-                        temperature=0.7,
-                        response_format={"type": "json_object"},
-                    )
+                    if self.provider == "hf":
+                        response = self._call_hf_completion(prompt)
+                    else:
+                        response = self._call_openai_completion(prompt)
                     break
                 except Exception as exc:
                     last_exc = exc
@@ -236,7 +312,7 @@ Respond with JSON only (no markdown, no prose):
             if response is None and last_exc is not None:
                 raise last_exc
 
-            content = response.choices[0].message.content
+            content = response
             data = self._parse_llm_json(content)
             normalized_action = self._normalize_action_type(data.get("action_type"))
             target_percentage = self._resolve_target_percentage(

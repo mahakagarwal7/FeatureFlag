@@ -221,6 +221,61 @@ def test_decide_recovery_on_api_error(monkeypatch):
     assert "API failed" in agent.last_error
 
 
+def test_provider_auto_prefers_hf_when_only_hf_token(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("API_KEY", raising=False)
+    monkeypatch.setenv("HF_TOKEN", "hf_test_token")
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+
+    agent = LLMAgent()
+    assert agent.provider == "hf"
+    assert not agent.use_baseline
+
+
+def test_decide_uses_hf_chat_completions_with_mocked_response(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "hf")
+    monkeypatch.setenv("HF_TOKEN", "hf_test_token")
+    monkeypatch.setenv("MODEL_NAME", "Qwen/Qwen2.5-7B-Instruct")
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"action_type": "INCREASE_ROLLOUT", "target_percentage": 55, "reason": "Healthy metrics"}'
+                        }
+                    }
+                ]
+            }
+
+    captured = {}
+
+    def fake_post(url, headers, json, timeout):
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["json"] = json
+        captured["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setattr("agents.llm_agent.httpx.post", fake_post)
+
+    agent = LLMAgent()
+    obs = make_observation(current_rollout_percentage=40.0, error_rate=0.01)
+    action = agent.decide(obs, history=[])
+
+    assert agent.provider == "hf"
+    assert action.action_type == "INCREASE_ROLLOUT"
+    assert action.target_percentage == 55.0
+    assert action.reason == "Healthy metrics"
+    assert captured["headers"]["Authorization"].startswith("Bearer ")
+    assert "chat/completions" in captured["url"]
+    assert captured["json"]["model"] == "Qwen/Qwen2.5-7B-Instruct"
+
+
 def test_hybrid_agent_safety_override(monkeypatch):
     hybrid = HybridAgent()
 
