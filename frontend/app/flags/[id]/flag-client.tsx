@@ -19,7 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { cn } from "@/lib/utils";
-import { useEnv } from "@/components/env/env-provider";
+import { useEnv } from "@/components/env-provider";
 
 export function FlagDetailClient() {
   const params = useParams();

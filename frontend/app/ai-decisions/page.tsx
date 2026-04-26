@@ -14,7 +14,7 @@ import {
   Area
 } from "recharts";
 
-import { useEnv } from "@/components/env/env-provider";
+import { useEnv } from "@/components/env-provider";
 import { cn } from "@/lib/utils";
 
 export default function AIDecisionsPage() {

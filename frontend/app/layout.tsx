@@ -4,7 +4,7 @@ import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Navbar } from "@/components/layout/navbar";
-import { EnvProvider } from "@/components/env/env-provider";
+import { EnvProvider } from "@/components/env-provider";
 
 const inter = Inter({
   variable: "--font-inter",

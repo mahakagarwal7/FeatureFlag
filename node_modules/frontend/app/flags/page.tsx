@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Search, MoreHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useRouter } from "next/navigation";
-import { useEnv } from "@/components/env/env-provider";
+import { useEnv } from "@/components/env-provider";
 
 export default function FeatureFlagsPage() {
   const router = useRouter();

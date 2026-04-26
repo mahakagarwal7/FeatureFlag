@@ -32,7 +32,7 @@ import { Progress } from "@/components/ui/progress";
 import { useMemo, useEffect, useState } from "react";
 import { Observation, api } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { useEnv } from "@/components/env/env-provider";
+import { useEnv } from "@/components/env-provider";
 
 
 const Dashboard = () => {

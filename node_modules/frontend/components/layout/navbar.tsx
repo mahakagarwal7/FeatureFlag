@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Badge } from "@/components/ui/badge";
-import { useEnv } from "@/components/env/env-provider";
+import { useEnv } from "@/components/env-provider";
 
 export function Navbar() {
   const { state } = useEnv();
