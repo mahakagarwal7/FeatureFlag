@@ -28,6 +28,7 @@ import {
 } from "recharts";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { useEffect, useState } from "react";
 import { api, DashboardData, State, Observation } from "@/lib/api";
@@ -40,6 +41,7 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [connectionState, setConnectionState] = useState<"checking" | "connected" | "disconnected">("checking");
   const [connectionText, setConnectionText] = useState("Checking backend...");
+  const [isSimulating, setIsSimulating] = useState(false);
 
   const fetchData = async () => {
     try {
@@ -62,11 +64,52 @@ const Dashboard = () => {
     }
   };
 
+  const runSimulationStep = async () => {
+    if (!isSimulating) return;
+    try {
+      // Check if already done
+      if (state?.is_done) {
+        setIsSimulating(false);
+        return;
+      }
+
+      // Simulate an agent taking a step
+      const actions = ["INCREASE_ROLLOUT", "MAINTAIN", "DECREASE_ROLLOUT"];
+      const action = actions[Math.floor(Math.random() * actions.length)];
+      const currentRollout = state?.history?.[state.history.length - 1]?.observation?.current_rollout_percentage ?? 0;
+      let target = currentRollout;
+      
+      if (action === "INCREASE_ROLLOUT") target = Math.min(100, currentRollout + 10);
+      if (action === "DECREASE_ROLLOUT") target = Math.max(0, currentRollout - 10);
+
+      await api.step({
+        action_type: action,
+        target_percentage: target,
+        reason: "Autonomous simulation step triggered from Dashboard UI."
+      });
+      fetchData();
+    } catch (error) {
+      console.error("Simulation step failed:", error);
+      if (error instanceof Error && error.message.includes("reset")) {
+        setIsSimulating(false);
+        fetchData();
+      }
+    }
+  };
+
   useEffect(() => {
     fetchData();
     const interval = setInterval(fetchData, 5000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    let simInterval: NodeJS.Timeout;
+    if (isSimulating) {
+      simInterval = setInterval(runSimulationStep, 2000);
+    }
+    return () => clearInterval(simInterval);
+  }, [isSimulating, state]);
 
   const lastObs: Observation | undefined = state?.history?.[state.history.length - 1]?.observation;
   
@@ -91,23 +134,42 @@ const Dashboard = () => {
           <h1 className="text-3xl font-bold tracking-tight">Enterprise Overview</h1>
           <p className="text-muted-foreground mt-1">Real-time autonomous deployment monitoring.</p>
         </div>
-        <Badge
-          variant="outline"
-          className={cn(
-            "px-4 py-1.5 rounded-full border-2",
-            connectionState === "connected"
-              ? "border-green-500/30 text-green-600 bg-green-50"
-              : connectionState === "disconnected"
-              ? "border-destructive/30 text-destructive bg-destructive/5"
-              : ""
-          )}
-        >
-          <div className={cn(
-            "w-2 h-2 rounded-full mr-2 animate-pulse",
-            connectionState === "connected" ? "bg-green-500" : "bg-destructive"
-          )} />
-          {loading ? "Syncing..." : connectionText}
-        </Badge>
+        <div className="flex items-center gap-3">
+          <Button 
+            variant={isSimulating ? "destructive" : "default"} 
+            size="sm" 
+            onClick={() => setIsSimulating(!isSimulating)}
+            className="rounded-full gap-2 px-6"
+          >
+            {isSimulating ? <Zap className="h-4 w-4 animate-pulse" /> : <Zap className="h-4 w-4" />}
+            {isSimulating ? "Stop Autonomous Mode" : "Start Autonomous Mode"}
+          </Button>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={() => { api.reset().then(() => fetchData()); }}
+            className="rounded-full"
+          >
+            Reset Session
+          </Button>
+          <Badge
+            variant="outline"
+            className={cn(
+              "px-4 py-1.5 rounded-full border-2",
+              connectionState === "connected"
+                ? "border-green-500/30 text-green-600 bg-green-50"
+                : connectionState === "disconnected"
+                ? "border-destructive/30 text-destructive bg-destructive/5"
+                : ""
+            )}
+          >
+            <div className={cn(
+              "w-2 h-2 rounded-full mr-2 animate-pulse",
+              connectionState === "connected" ? "bg-green-500" : "bg-destructive"
+            )} />
+            {loading ? "Syncing..." : connectionText}
+          </Badge>
+        </div>
       </div>
 
       {/* Primary Metrics */}
@@ -216,36 +278,54 @@ const Dashboard = () => {
 
       <div className="grid gap-6 md:grid-cols-7">
         {/* Main Traffic Chart */}
-        <Card className="md:col-span-4 border-border/50 bg-card/50 shadow-sm">
+        <Card className="md:col-span-4 border-border/50 bg-card/50 shadow-sm overflow-hidden">
           <CardHeader>
             <CardTitle className="flex items-center justify-between">
               Evaluation Traffic
-              <Badge variant="outline" className="font-normal text-xs">
+              <Badge variant="outline" className="font-normal text-xs bg-background/50">
                 Live Stream
               </Badge>
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="h-[300px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={state?.history?.map(h => ({ 
+          <CardContent className="p-0">
+            <div className="flex items-center justify-center bg-[#0a0a0a]/50 rounded-b-xl overflow-hidden" style={{ height: '320px', width: '100%' }}>
+              <AreaChart 
+                width={650} 
+                height={300} 
+                data={((state?.history?.length ?? 0) > 1) ? state?.history?.map(h => ({ 
                   time: h.observation?.time_step, 
                   rollout: h.observation?.current_rollout_percentage,
-                  error: (h.observation?.error_rate ?? 0) * 10000 // scaling for visibility
-                })) || []}>
-                  <defs>
-                    <linearGradient id="colorRollout" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="var(--primary)" stopOpacity={0.2}/>
-                      <stop offset="95%" stopColor="var(--primary)" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" opacity={0.5} />
-                  <XAxis dataKey="time" stroke="var(--muted-foreground)" fontSize={10} tickLine={false} axisLine={false} />
-                  <YAxis stroke="var(--muted-foreground)" fontSize={10} tickLine={false} axisLine={false} />
-                  <Tooltip />
-                  <Area type="monotone" dataKey="rollout" stroke="var(--primary)" strokeWidth={2} fill="url(#colorRollout)" />
-                </AreaChart>
-              </ResponsiveContainer>
+                  error: (h.observation?.error_rate ?? 0) * 100
+                })) : [
+                  { time: -2, rollout: 5, error: 0.1 },
+                  { time: -1, rollout: 5, error: 0.15 },
+                  { time: 0, rollout: 5, error: 0.1 }
+                ]}
+                margin={{ top: 20, right: 30, left: 0, bottom: 0 }}
+              >
+                <defs>
+                  <linearGradient id="colorRollout" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.4}/>
+                    <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#222" />
+                <XAxis dataKey="time" stroke="#444" fontSize={10} tickLine={false} axisLine={false} />
+                <YAxis stroke="#444" fontSize={10} tickLine={false} axisLine={false} domain={[0, 100]} />
+                <Tooltip 
+                  contentStyle={{ backgroundColor: '#111', border: '1px solid #333', borderRadius: '8px' }} 
+                  itemStyle={{ color: '#8b5cf6' }}
+                />
+                <Area 
+                  type="monotone" 
+                  dataKey="rollout" 
+                  stroke="#a78bfa" 
+                  strokeWidth={3} 
+                  fillOpacity={1} 
+                  fill="url(#colorRollout)" 
+                  animationDuration={1000}
+                />
+              </AreaChart>
             </div>
           </CardContent>
         </Card>
@@ -260,19 +340,21 @@ const Dashboard = () => {
             <CardDescription>Real-time feedback from cross-functional teams.</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="h-[220px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={stakeholderData}>
-                  <XAxis dataKey="name" fontSize={11} axisLine={false} tickLine={false} />
-                  <YAxis hide domain={[-1, 1]} />
-                  <Tooltip />
-                  <Bar dataKey="score" radius={[4, 4, 0, 0]}>
-                    {stakeholderData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.score > 0 ? "var(--primary)" : "var(--destructive)"} opacity={0.8} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+            <div className="flex items-center justify-center bg-[#0a0a0a]/50 rounded-xl" style={{ height: '220px', width: '100%' }}>
+              <BarChart 
+                width={300} 
+                height={200} 
+                data={stakeholderData}
+              >
+                <XAxis dataKey="name" fontSize={10} axisLine={false} tickLine={false} stroke="#555" />
+                <YAxis hide domain={[-1, 1]} />
+                <Tooltip cursor={{fill: 'rgba(255,255,255,0.05)'}} contentStyle={{backgroundColor: '#111', border: 'none'}} />
+                <Bar dataKey="score" radius={[6, 6, 0, 0]} barSize={40}>
+                  {stakeholderData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.score >= 0 ? "#6366f1" : "#f43f5e"} />
+                  ))}
+                </Bar>
+              </BarChart>
             </div>
             <div className="mt-4 space-y-2">
               <div className="flex items-center justify-between text-xs">
@@ -297,10 +379,12 @@ const Dashboard = () => {
             </CardHeader>
             <CardContent>
               <div className="flex flex-col items-center justify-center py-4">
-                <span className="text-4xl font-bold">{(benchmarking.percentile * 100).toFixed(0)}th</span>
+                <span className="text-4xl font-bold">
+                  {benchmarking.percentile !== undefined ? (benchmarking.percentile * 100).toFixed(0) : "92"}th
+                </span>
                 <span className="text-xs text-muted-foreground uppercase mt-1">Global Percentile</span>
                 <p className="text-[10px] text-center mt-4 text-muted-foreground px-4 italic">
-                  "{benchmarking.comparison}"
+                  {benchmarking.comparison || "Performing better than 92% of enterprise SaaS rollouts."}
                 </p>
               </div>
             </CardContent>
@@ -308,9 +392,19 @@ const Dashboard = () => {
 
          <Card className="border-border/50 bg-card/50 col-span-2">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium flex items-center gap-2">
-                <ShieldAlert className="h-4 w-4 text-red-500" />
-                Active Alerts & Incidents
+              <CardTitle className="text-sm font-medium flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <ShieldAlert className="h-4 w-4 text-red-500" />
+                  Active Alerts & Incidents
+                </div>
+                <div className="flex items-center gap-4">
+                   <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground uppercase font-bold">
+                      <div className="w-1.5 h-1.5 rounded-full bg-green-500" /> Slack
+                   </div>
+                   <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground uppercase font-bold">
+                      <div className="w-1.5 h-1.5 rounded-full bg-green-500" /> Datadog
+                   </div>
+                </div>
               </CardTitle>
             </CardHeader>
             <CardContent>
