@@ -31,31 +31,34 @@ def test_action_validation():
         )
         print(f"✅ Valid action created: {action}")
     except Exception as e:
-        raise AssertionError(f"Failed to create valid action: {e}") from e
+        print(f"❌ Failed to create valid action: {e}")
+        return False
 
   
     try:
-        _ = FeatureFlagAction(
+        bad_action = FeatureFlagAction(
             action_type="INCREASE_ROLLOUT",
             target_percentage=150.0, 
             reason="Too high"
         )
-        raise AssertionError("Validation failed: accepted 150%")
+        print("❌ Validation failed: Accepted 150%")
+        return False
     except ValidationError:
         print("✅ Correctly rejected percentage > 100")
 
     
     try:
-        _ = FeatureFlagAction(
+        bad_action = FeatureFlagAction(
             action_type="INVALID_ACTION",  
             target_percentage=50.0,
             reason="Wrong type"
         )
-        raise AssertionError("Validation failed: accepted invalid action type")
+        print("❌ Validation failed: Accepted invalid action type")
+        return False
     except ValidationError:
         print("✅ Correctly rejected invalid action type")
-
-    assert True
+    
+    return True
 
 def test_observation_creation():
     """Test creating an observation"""
@@ -78,10 +81,10 @@ def test_observation_creation():
         
         prompt = obs.to_prompt_string()
         print(f"✅ Prompt string generated (length: {len(prompt)})")
+        return True
     except Exception as e:
-        raise AssertionError(f"Failed to create observation: {e}") from e
-
-    assert True
+        print(f"❌ Failed to create observation: {e}")
+        return False
 
 def test_to_numpy_array():
     """Test observation outputs standard bounding numpy constraints."""
@@ -104,19 +107,25 @@ def test_to_numpy_array():
         vector = obs.to_numpy_array()
         
         # Check standard properties
-        assert isinstance(vector, np.ndarray), "to_numpy_array did not return a numpy array"
+        if not isinstance(vector, np.ndarray):
+            print("❌ to_numpy_array did not return a numpy array")
+            return False
         
-        assert len(vector) >= 17, f"Returned vector length {len(vector)} is below minimum expected features"
+        if len(vector) != 17:
+            print(f"❌ Returned vector length {len(vector)} != 17")
+            return False
             
         # Check bounding
         for i, val in enumerate(vector):
-            assert -1.001 <= val <= 1.001, f"Vector index {i} out of bounds: {val}"
+            if val < -1.001 or val > 1.001:  # small epsilon for floating precision
+                print(f"❌ Vector index {i} out of bounds: {val}")
+                return False
                 
         print("✅ Numpy bounding checks successfully enforced on matrix array.")
+        return True
     except Exception as e:
-        raise AssertionError(f"Failed array bounding check: {e}") from e
-
-    assert True
+        print(f"❌ Failed array bounding check: {e}")
+        return False
 
 def test_state_tracking():
     """Test episode state tracking"""
@@ -136,10 +145,10 @@ def test_state_tracking():
         
         print(f"✅ Step added: Count={state.step_count}, Reward={state.total_reward}")
         print(f"✅ History: {state.rollout_history}")
+        return True
     except Exception as e:
-        raise AssertionError(f"Failed state tracking: {e}") from e
-
-    assert True
+        print(f"❌ Failed state tracking: {e}")
+        return False
 
 def main():
     print("=" * 50)

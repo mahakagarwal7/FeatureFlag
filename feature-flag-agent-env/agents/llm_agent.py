@@ -38,7 +38,6 @@ class LLMAgent:
         generic_api_key = os.getenv("API_KEY")
         hf_token = os.getenv("HF_TOKEN")
 
-        # Provider selection: prefer Hugging Face when only HF_TOKEN is configured.
         if requested_provider in {"hf", "huggingface"}:
             self.provider = "hf"
         elif requested_provider == "openai":
@@ -48,7 +47,6 @@ class LLMAgent:
 
         default_model = "Qwen/Qwen2.5-7B-Instruct" if self.provider == "hf" else "gpt-4o-mini"
         self.model = model or os.getenv("MODEL_NAME", default_model)
-
         self.api_base_url = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
         hf_api_base_url = os.getenv("HF_API_BASE_URL", "https://router.huggingface.co/v1")
         self.hf_chat_completions_url = os.getenv(

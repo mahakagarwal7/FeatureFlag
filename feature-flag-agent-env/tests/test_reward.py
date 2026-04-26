@@ -53,7 +53,7 @@ def test_reward_function():
     assert reward > 0, "Reward should be positive for safe rollout increase"
     
     print("   ✅ Reward function working correctly!")
-    assert True
+    return True
 
 
 def test_reward_high_errors():
@@ -99,7 +99,7 @@ def test_reward_high_errors():
     assert reward < 0, "Reward should be negative for high error rollout"
     
     print("   ✅ High error penalty working correctly!")
-    assert True
+    return True
 
 
 def test_task1_target_behavior():
@@ -181,7 +181,7 @@ def test_task1_target_behavior():
     assert r100 < 0, "Task1 reward should penalize full rollout overshoot"
 
     print("   ✅ Task1 target-centered reward behavior is correct!")
-    assert True
+    return True
 
 
 def main():

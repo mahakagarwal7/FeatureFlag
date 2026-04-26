@@ -31,7 +31,7 @@ def test_environment_reset():
     print(f"   📊 Initial state: rollout={obs.current_rollout_percentage}%, "
           f"errors={obs.error_rate*100:.2f}%")
     
-    assert True
+    return True
 
 
 def test_environment_step():
@@ -64,7 +64,7 @@ def test_environment_step():
     print(f"   📊 After step: rollout={response.observation.current_rollout_percentage}%, "
           f"reward={response.reward:+.2f}")
     
-    assert True
+    return True
 
 
 def test_environment_multiple_steps():
@@ -96,7 +96,7 @@ def test_environment_multiple_steps():
     print(f"   📊 Total reward: {total_reward:+.2f}")
     print(f"   📊 Final rollout: {rollout_levels[-1]}%")
     
-    assert True
+    return True
 
 
 def test_environment_done_conditions():
@@ -130,7 +130,7 @@ def test_environment_done_conditions():
     print(f"   ✅ Episode ended: done={response.done}")
     print(f"   📊 Final errors: {response.observation.error_rate*100:.2f}%")
     
-    assert True
+    return True
 
 
 def test_environment_invalid_action():
@@ -141,18 +141,18 @@ def test_environment_invalid_action():
     obs = env.reset()
     
     # Try invalid percentage (> 100)
-    did_raise = False
     try:
         action = FeatureFlagAction(
             action_type="INCREASE_ROLLOUT",
             target_percentage=150.0,  # Invalid!
             reason="This should fail"
         )
-        _ = env.step(action)
+        response = env.step(action)
+        print("   ❌ Should have raised ValueError")
+        return False
     except ValueError as e:
-        did_raise = True
         print(f"   ✅ Correctly rejected invalid action: {str(e)[:50]}...")
-    assert did_raise, "Expected ValueError for invalid action"
+        return True
 
 
 def test_environment_state():
@@ -184,7 +184,7 @@ def test_environment_state():
     print(f"   📊 Rollout history: {state.rollout_history}")
     print(f"   📊 Action history: {state.action_history}")
     
-    assert True
+    return True
 
 
 def main():

@@ -12,7 +12,17 @@ param(
 $ErrorActionPreference = "Stop"
 
 if (-not $Token) {
-    throw "HF token not provided. Set HF_TOKEN or pass -Token."
+    if (Test-Path ".env") {
+        $tokenLine = Get-Content ".env" | Where-Object { $_ -match "^HF_TOKEN=" } | Select-Object -First 1
+        if ($tokenLine) {
+            $Token = ($tokenLine -replace "^HF_TOKEN=", "").Trim()
+            $Token = $Token.Trim('"').Trim("'")
+        }
+    }
+}
+
+if (-not $Token) {
+    throw "HF token not provided. Set HF_TOKEN, keep HF_TOKEN in .env, or pass -Token."
 }
 
 if (-not (Test-Path ".git")) {
@@ -37,17 +47,29 @@ $existingRemote = git remote | Where-Object { $_ -eq $RemoteName }
 if (-not $existingRemote) {
     Write-Host "Adding remote '$RemoteName' => $hfUrl"
     git remote add $RemoteName $hfUrl
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to add git remote '$RemoteName'."
+    }
 } else {
     Write-Host "Remote '$RemoteName' already exists. Updating URL => $hfUrl"
     git remote set-url $RemoteName $hfUrl
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to update git remote '$RemoteName'."
+    }
 }
 
 Write-Host "Committing current changes (if any)..."
 git add .
+if ($LASTEXITCODE -ne 0) {
+    throw "Failed to stage changes."
+}
 
 git diff --cached --quiet
 if ($LASTEXITCODE -ne 0) {
     git commit -m $CommitMessage | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to create commit."
+    }
     Write-Host "Created commit: $CommitMessage"
 } else {
     Write-Host "No staged changes to commit."
@@ -55,6 +77,9 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "Pushing to Hugging Face Space..."
 git push $RemoteName HEAD:main
+if ($LASTEXITCODE -ne 0) {
+    throw "Push failed. Ensure the Space exists and your token has write access."
+}
 
 Write-Host "Deployment pushed successfully."
 Write-Host "Space URL: https://huggingface.co/spaces/$SpaceId"

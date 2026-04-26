@@ -36,7 +36,7 @@ def test_vanilla_backward_compat():
     assert "stakeholder_approval" not in response.info
 
     print("   ✅ Vanilla env unchanged")
-    assert True
+    return True
 
 
 def test_stakeholders_only():
@@ -61,7 +61,7 @@ def test_stakeholders_only():
           f"CS={response.observation.stakeholder_customer_sentiment:+.2f}")
     print(f"   📊 Overall approval: {response.info['stakeholder_approval']}")
     print("   ✅ Stakeholders populated correctly")
-    assert True
+    return True
 
 
 def test_mission_only():
@@ -77,7 +77,7 @@ def test_mission_only():
 
     print(f"   📊 Mission: {obs.mission_name}, Phase: {obs.current_phase}")
     print("   ✅ Mission populated correctly")
-    assert True
+    return True
 
 
 def test_full_episode_all_features():
@@ -126,7 +126,7 @@ def test_full_episode_all_features():
     assert final_obs.mission_name is not None
 
     print("   ✅ Full episode completed with all features")
-    assert True
+    return True
 
 
 def test_prompt_string_extended():
@@ -145,7 +145,7 @@ def test_prompt_string_extended():
 
     print(f"   📊 Prompt length: {len(prompt)} chars")
     print("   ✅ Extended prompt sections present")
-    assert True
+    return True
 
 
 def test_enterprise_mission():
@@ -184,7 +184,7 @@ def test_enterprise_mission():
     state = env.state()
     print(f"   📊 Steps: {state.step_count}, Total reward: {state.total_reward:+.2f}")
     print("   ✅ Enterprise mission executed")
-    assert True
+    return True
 
 
 # --- Main ------------------------------------------------------------------
