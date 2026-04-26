@@ -127,7 +127,14 @@ async def lifespan(app: FastAPI):
     """
     # Startup: Initialize environment
     global environment
-    environment = FeatureFlagEnvironment()
+    environment = FeatureFlagEnvironment(
+        stakeholders_enabled=True,
+        mission_config="enterprise_payment_gateway",
+        tools_enabled=True,
+        chaos_enabled=True,
+        hitl_enabled=False,
+        benchmarking_config={"industry": "saas", "company_size": "enterprise"}
+    )
     print("[*] Environment initialized on server startup")
     yield
     # Shutdown: Cleanup if needed

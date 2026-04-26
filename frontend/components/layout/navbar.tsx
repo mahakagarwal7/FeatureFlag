@@ -5,26 +5,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Badge } from "@/components/ui/badge";
-import { useEffect, useState } from "react";
-import { api, State } from "@/lib/api";
+import { useEnv } from "@/components/env/env-provider";
 
 export function Navbar() {
-  const [state, setState] = useState<State | null>(null);
-
-  useEffect(() => {
-    const fetchState = async () => {
-      try {
-        const s = await api.getState();
-        setState(s);
-      } catch {}
-    };
-    fetchState();
-    const interval = setInterval(fetchState, 5000);
-    return () => clearInterval(interval);
-  }, []);
+  const { state } = useEnv();
 
   const lastObs = state?.history?.[state.history.length - 1]?.observation;
-  const tenantId = String(lastObs?.extra_context?.tenant_id ?? "Global");
+  const tenantId = String(
+    (lastObs?.extra_context as Record<string, unknown> | undefined)?.tenant_id ?? "Global"
+  );
 
   return (
     <header className="sticky top-0 z-30 flex h-16 w-full items-center justify-between border-b bg-background/80 px-6 backdrop-blur-sm">

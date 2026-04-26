@@ -111,7 +111,7 @@ Simulation Observation:
 
 Based on the above EXTERNAL CONTEXT and Simulation facts, make a rollout decision.
 Priority: 
-1. If external pipeline signals risk, be EXTREMELY conservative (Maintain or Decrease).
+1. If External Pipeline is failing, be EXTREMELY conservative (Maintain or Decrease).
 2. If metrics are healthy, aim for steady rollout.
 
 Allowed action_type: INCREASE_ROLLOUT, DECREASE_ROLLOUT, MAINTAIN, HALT_ROLLOUT, FULL_ROLLOUT, ROLLBACK

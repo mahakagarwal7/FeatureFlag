@@ -116,7 +116,7 @@ def test_metrics_tracking():
     """Tool should track call count, errors, latency."""
     print("🧪 Metrics tracking...")
     tool = MockGitHubTool()
-    tool.set_env_state({"error_rate": 0.02, "rollout_percentage": 25.0})
+    tool.set_env_state({"error_rate": 0.02, "rollout_percentage": 10.0})
 
     tool.call("get_deployment_status", {"environment": "production"})
     tool.call("get_cicd_status", {"branch": "main"})
@@ -146,7 +146,7 @@ def test_tool_manager_register():
     assert manager.connected_count == 2
     assert "github" in manager.tool_names
 
-    manager.update_env_state({"error_rate": 0.02, "latency_p99_ms": 100})
+    manager.update_env_state({"error_rate": 0.02, "latency_p99_ms": 100, "rollout_percentage": 10})
 
     result = manager.execute(ToolCallRequest(
         tool_name="github",

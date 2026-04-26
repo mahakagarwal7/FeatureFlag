@@ -28,83 +28,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { useEffect, useState } from "react";
-import { api, DashboardData, State, Observation } from "@/lib/api";
+import { useMemo } from "react";
+import { Observation } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { useEnv } from "@/components/env/env-provider";
 
 
 const Dashboard = () => {
-  const [data, setData] = useState<DashboardData | null>(null);
-  const [state, setState] = useState<State | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [connectionState, setConnectionState] = useState<"checking" | "connected" | "disconnected">("checking");
-  const [connectionText, setConnectionText] = useState("Checking backend...");
-  const [isSimulating, setIsSimulating] = useState(false);
-
-  const fetchData = async () => {
-    try {
-      const [dashboard, currentState, health] = await Promise.all([
-        api.getDashboard(),
-        api.getState(),
-        api.getHealth()
-      ]);
-      
-      setData(dashboard);
-      setState(currentState);
-      setConnectionState("connected");
-      setConnectionText(`Backend ${health?.status || "healthy"}`);
-    } catch (error) {
-      console.error("Failed to fetch dashboard data:", error);
-      setConnectionState("disconnected");
-      setConnectionText(error instanceof Error ? error.message : "Backend unreachable");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const runSimulationStep = async () => {
-    if (!isSimulating) return;
-    try {
-      // Check if already done
-      if (state?.is_done) {
-        setIsSimulating(false);
-        return;
-      }
-
-      // Simulate an agent taking a step
-      const actions = ["INCREASE_ROLLOUT", "MAINTAIN", "DECREASE_ROLLOUT"];
-      const action = actions[Math.floor(Math.random() * actions.length)];
-      const currentRollout = state?.history?.[state.history.length - 1]?.observation?.current_rollout_percentage ?? 0;
-      let target = currentRollout;
-      
-      if (action === "INCREASE_ROLLOUT") target = Math.min(100, currentRollout + 10);
-      if (action === "DECREASE_ROLLOUT") target = Math.max(0, currentRollout - 10);
-
-      await api.step({
-        action_type: action,
-        target_percentage: target,
-        reason: "Autonomous simulation step triggered from Dashboard UI."
-      });
-      fetchData();
-    } catch (error) {
-      console.error("Simulation step failed:", error);
-      if (error instanceof Error && error.message.includes("reset")) {
-        setIsSimulating(false);
-        fetchData();
-      }
-    }
-  };
-
-  useEffect(() => {
-    const initialFetch = setTimeout(() => {
-      void fetchData();
-    }, 0);
-    const interval = setInterval(fetchData, 5000);
-    return () => {
-      clearTimeout(initialFetch);
-      clearInterval(interval);
-    };
-  }, []);
+  const { dashboard: data, state, connectionState, connectionText } = useEnv();
+  const loading = useMemo(() => connectionState === "checking" && !data && !state, [connectionState, data, state]);
 
   useEffect(() => {
     let simInterval: NodeJS.Timeout;
@@ -120,19 +52,27 @@ const Dashboard = () => {
   const errorRate = (lastObs?.error_rate ?? data?.summary?.error_rate ?? 0) * 100;
   const latency = lastObs?.latency_p99_ms ?? data?.summary?.latency_p99_ms ?? 0;
   
-  const anomalyData = ((lastObs?.extra_context?.anomaly ?? lastObs?.extra_context?.tenant_anomaly ?? null) as {
-    is_anomaly?: boolean;
-    anomaly_score?: number;
-    anomalies?: string[];
-  } | null) ?? {};
-  const benchmarking = ((lastObs?.extra_context?.benchmarking ?? null) as {
-    percentile?: number;
-    comparison?: string;
-  } | null) ?? {};
-  const patternRisk = Number(lastObs?.extra_context?.pattern_risk ?? lastObs?.extra_context?.tenant_pattern_risk ?? 0);
-  const chaosIncident = (lastObs?.chaos_incident ?? null) as
-    | { type?: string; description?: string; intensity?: number }
-    | null;
+  const extra = lastObs?.extra_context as Record<string, unknown> | undefined;
+  const anomalyRaw = (extra?.anomaly ?? extra?.tenant_anomaly) as unknown;
+  const anomaly = anomalyRaw && typeof anomalyRaw === "object" ? (anomalyRaw as Record<string, unknown>) : {};
+  const anomalyIs = Boolean(anomaly.is_anomaly);
+  const anomalyScore = Number(anomaly.anomaly_score ?? 0);
+  const anomalyList = Array.isArray(anomaly.anomalies) ? (anomaly.anomalies as unknown[]) : [];
+
+  const benchmarkingRaw = extra?.benchmarking as unknown;
+  const benchmarking = benchmarkingRaw && typeof benchmarkingRaw === "object"
+    ? (benchmarkingRaw as Record<string, unknown>)
+    : {};
+  const benchmarkingPercentile = Number(benchmarking.percentile ?? 0);
+  const benchmarkingComparison = typeof benchmarking.comparison === "string" ? benchmarking.comparison : "";
+
+  const patternRisk = Number(extra?.pattern_risk ?? extra?.tenant_pattern_risk ?? 0);
+  const chaos = (lastObs?.chaos_incident && typeof lastObs.chaos_incident === "object")
+    ? (lastObs.chaos_incident as Record<string, unknown>)
+    : null;
+  const chaosType = typeof chaos?.type === "string" ? chaos.type : "incident";
+  const chaosDescription = typeof chaos?.description === "string" ? chaos.description : "";
+  const chaosIntensity = Number(chaos?.intensity ?? 0);
 
   const stakeholderData = [
     { name: "DevOps", score: lastObs?.stakeholder_devops_sentiment ?? 0 },
@@ -262,8 +202,8 @@ const Dashboard = () => {
           <CardContent className="space-y-4">
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">Anomaly Score</span>
-              <Badge variant={anomalyData.is_anomaly ? "destructive" : "secondary"} className="font-mono">
-                {(anomalyData.anomaly_score ?? 0).toFixed(2)}
+              <Badge variant={anomalyIs ? "destructive" : "secondary"} className="font-mono">
+                {anomalyScore.toFixed(2)}
               </Badge>
             </div>
             <div className="flex items-center justify-between">
@@ -276,9 +216,9 @@ const Dashboard = () => {
             <div className="flex items-center justify-between pt-2 border-t">
               <span className="text-xs text-muted-foreground">Detected Anomalies</span>
               <div className="flex gap-1">
-                {(anomalyData.anomalies ?? []).length > 0 ? (
-                  (anomalyData.anomalies ?? []).map((a: string) => (
-                    <Badge key={a} variant="outline" className="text-[10px] uppercase">{a}</Badge>
+                {anomalyList.length > 0 ? (
+                  anomalyList.map((a) => (
+                    <Badge key={String(a)} variant="outline" className="text-[10px] uppercase">{String(a)}</Badge>
                   ))
                 ) : (
                   <span className="text-[10px] text-green-600 font-medium italic">None detected</span>
@@ -300,12 +240,10 @@ const Dashboard = () => {
               </Badge>
             </CardTitle>
           </CardHeader>
-          <CardContent className="p-0">
-            <div className="flex items-center justify-center bg-[#0a0a0a]/50 rounded-b-xl overflow-hidden" style={{ height: '320px', width: '100%' }}>
-              <AreaChart 
-                width={650} 
-                height={300} 
-                data={((state?.history?.length ?? 0) > 1) ? state?.history?.map(h => ({ 
+          <CardContent>
+            <div className="h-[300px] w-full">
+              <ResponsiveContainer width="100%" height={300} minHeight={300}>
+                <AreaChart data={state?.history?.map(h => ({ 
                   time: h.observation?.time_step, 
                   rollout: h.observation?.current_rollout_percentage,
                   error: (h.observation?.error_rate ?? 0) * 100
@@ -353,21 +291,19 @@ const Dashboard = () => {
             <CardDescription>Real-time feedback from cross-functional teams.</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="flex items-center justify-center bg-[#0a0a0a]/50 rounded-xl" style={{ height: '220px', width: '100%' }}>
-              <BarChart 
-                width={300} 
-                height={200} 
-                data={stakeholderData}
-              >
-                <XAxis dataKey="name" fontSize={10} axisLine={false} tickLine={false} stroke="#555" />
-                <YAxis hide domain={[-1, 1]} />
-                <Tooltip cursor={{fill: 'rgba(255,255,255,0.05)'}} contentStyle={{backgroundColor: '#111', border: 'none'}} />
-                <Bar dataKey="score" radius={[6, 6, 0, 0]} barSize={40}>
-                  {stakeholderData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.score >= 0 ? "#6366f1" : "#f43f5e"} />
-                  ))}
-                </Bar>
-              </BarChart>
+            <div className="h-[220px]">
+              <ResponsiveContainer width="100%" height={220} minHeight={220}>
+                <BarChart data={stakeholderData}>
+                  <XAxis dataKey="name" fontSize={11} axisLine={false} tickLine={false} />
+                  <YAxis hide domain={[-1, 1]} />
+                  <Tooltip />
+                  <Bar dataKey="score" radius={[4, 4, 0, 0]}>
+                    {stakeholderData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.score > 0 ? "var(--primary)" : "var(--destructive)"} opacity={0.8} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
             </div>
             <div className="mt-4 space-y-2">
               <div className="flex items-center justify-between text-xs">
@@ -392,12 +328,10 @@ const Dashboard = () => {
             </CardHeader>
             <CardContent>
               <div className="flex flex-col items-center justify-center py-4">
-                <span className="text-4xl font-bold">
-                  {benchmarking.percentile !== undefined ? (benchmarking.percentile * 100).toFixed(0) : "92"}th
-                </span>
+                <span className="text-4xl font-bold">{(benchmarkingPercentile * 100).toFixed(0)}th</span>
                 <span className="text-xs text-muted-foreground uppercase mt-1">Global Percentile</span>
                 <p className="text-[10px] text-center mt-4 text-muted-foreground px-4 italic">
-                  {benchmarking.comparison || "Performing better than 92% of enterprise SaaS rollouts."}
+                  {benchmarkingComparison ? <> &quot;{benchmarkingComparison}&quot;</> : "—"}
                 </p>
               </div>
             </CardContent>
@@ -418,17 +352,17 @@ const Dashboard = () => {
               </CardTitle>
             </CardHeader>
             <CardContent>
-               {chaosIncident ? (
+               {chaos ? (
                  <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-4">
                     <div className="bg-red-100 p-2 rounded-full">
                        <AlertTriangle className="h-5 w-5 text-red-600" />
                     </div>
                     <div>
-                       <h4 className="font-bold text-red-900 text-sm">{chaosIncident.type ?? "Unknown Incident"}</h4>
-                       <p className="text-xs text-red-700 mt-1">{chaosIncident.description ?? "No details available."}</p>
+                       <h4 className="font-bold text-red-900 text-sm">{chaosType}</h4>
+                       <p className="text-xs text-red-700 mt-1">{chaosDescription}</p>
                        <div className="flex items-center gap-4 mt-3">
                           <Badge className="bg-red-200 text-red-900 hover:bg-red-200 border-none font-mono">
-                             INTENSITY: {(Number(chaosIncident.intensity ?? 0) * 100).toFixed(0)}%
+                             INTENSITY: {(chaosIntensity * 100).toFixed(0)}%
                           </Badge>
                           <span className="text-[10px] font-bold text-red-600 animate-pulse">CRITICAL ACTION REQUIRED</span>
                        </div>
