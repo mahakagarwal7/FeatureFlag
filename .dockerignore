@@ -1,0 +1,17 @@
+node_modules
+.next
+out
+static
+.git
+.venv
+__pycache__
+*.pyc
+.env
+build_output.txt
+build_output_utf8.txt
+frontend/node_modules
+frontend/.next
+frontend/out
+feature-flag-agent-env/static
+feature-flag-agent-env/__pycache__
+feature-flag-agent-env/logs/*.db
