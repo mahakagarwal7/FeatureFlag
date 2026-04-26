@@ -67,9 +67,9 @@ def final_e2e_test():
                 action_type="TOOL_CALL",
                 target_percentage=rollout,
                 tool_call={
-                    "tool_name": "datadog",
-                    "action_name": "get_error_rate",
-                    "params": {"service_name": "payments"}
+                    "tool_name": "github",
+                    "action_name": "get_cicd_status",
+                    "params": {"branch": "main"}
                 }
             )
         else:

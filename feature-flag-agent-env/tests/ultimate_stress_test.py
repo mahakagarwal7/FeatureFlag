@@ -33,7 +33,7 @@ def run_episode(env, episode_num):
         # Decide action type
         if random.random() < 0.2:
             # Randomly call a tool
-            tool = random.choice(["github", "datadog", "slack"])
+            tool = random.choice(["github", "slack"])
             action_type = "TOOL_CALL"
             target_pct = obs.current_rollout_percentage
             tool_call = {

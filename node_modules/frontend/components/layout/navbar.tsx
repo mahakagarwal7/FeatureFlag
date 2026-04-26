@@ -16,7 +16,7 @@ export function Navbar() {
       try {
         const s = await api.getState();
         setState(s);
-      } catch (error) {}
+      } catch {}
     };
     fetchState();
     const interval = setInterval(fetchState, 5000);
@@ -24,7 +24,7 @@ export function Navbar() {
   }, []);
 
   const lastObs = state?.history?.[state.history.length - 1]?.observation;
-  const tenantId = lastObs?.extra_context?.tenant_id || "Global";
+  const tenantId = String(lastObs?.extra_context?.tenant_id ?? "Global");
 
   return (
     <header className="sticky top-0 z-30 flex h-16 w-full items-center justify-between border-b bg-background/80 px-6 backdrop-blur-sm">

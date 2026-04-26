@@ -3,7 +3,6 @@
 import { MetricCard } from "@/components/ui/metric-card";
 import { 
   Flag, 
-  Users, 
   Activity, 
   AlertCircle, 
   ShieldAlert, 
@@ -17,7 +16,6 @@ import {
 import { 
   Area, 
   AreaChart, 
-  ResponsiveContainer, 
   Tooltip, 
   XAxis, 
   YAxis,
@@ -98,9 +96,14 @@ const Dashboard = () => {
   };
 
   useEffect(() => {
-    fetchData();
+    const initialFetch = setTimeout(() => {
+      void fetchData();
+    }, 0);
     const interval = setInterval(fetchData, 5000);
-    return () => clearInterval(interval);
+    return () => {
+      clearTimeout(initialFetch);
+      clearInterval(interval);
+    };
   }, []);
 
   useEffect(() => {
@@ -117,9 +120,19 @@ const Dashboard = () => {
   const errorRate = (lastObs?.error_rate ?? data?.summary?.error_rate ?? 0) * 100;
   const latency = lastObs?.latency_p99_ms ?? data?.summary?.latency_p99_ms ?? 0;
   
-  const anomalyData = lastObs?.extra_context?.anomaly || lastObs?.extra_context?.tenant_anomaly || {};
-  const benchmarking = lastObs?.extra_context?.benchmarking || {};
-  const patternRisk = lastObs?.extra_context?.pattern_risk ?? lastObs?.extra_context?.tenant_pattern_risk ?? 0;
+  const anomalyData = ((lastObs?.extra_context?.anomaly ?? lastObs?.extra_context?.tenant_anomaly ?? null) as {
+    is_anomaly?: boolean;
+    anomaly_score?: number;
+    anomalies?: string[];
+  } | null) ?? {};
+  const benchmarking = ((lastObs?.extra_context?.benchmarking ?? null) as {
+    percentile?: number;
+    comparison?: string;
+  } | null) ?? {};
+  const patternRisk = Number(lastObs?.extra_context?.pattern_risk ?? lastObs?.extra_context?.tenant_pattern_risk ?? 0);
+  const chaosIncident = (lastObs?.chaos_incident ?? null) as
+    | { type?: string; description?: string; intensity?: number }
+    | null;
 
   const stakeholderData = [
     { name: "DevOps", score: lastObs?.stakeholder_devops_sentiment ?? 0 },
@@ -264,7 +277,7 @@ const Dashboard = () => {
               <span className="text-xs text-muted-foreground">Detected Anomalies</span>
               <div className="flex gap-1">
                 {(anomalyData.anomalies ?? []).length > 0 ? (
-                  anomalyData.anomalies.map((a: string) => (
+                  (anomalyData.anomalies ?? []).map((a: string) => (
                     <Badge key={a} variant="outline" className="text-[10px] uppercase">{a}</Badge>
                   ))
                 ) : (
@@ -401,24 +414,21 @@ const Dashboard = () => {
                    <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground uppercase font-bold">
                       <div className="w-1.5 h-1.5 rounded-full bg-green-500" /> Slack
                    </div>
-                   <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground uppercase font-bold">
-                      <div className="w-1.5 h-1.5 rounded-full bg-green-500" /> Datadog
-                   </div>
                 </div>
               </CardTitle>
             </CardHeader>
             <CardContent>
-               {lastObs?.chaos_incident ? (
+               {chaosIncident ? (
                  <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-4">
                     <div className="bg-red-100 p-2 rounded-full">
                        <AlertTriangle className="h-5 w-5 text-red-600" />
                     </div>
                     <div>
-                       <h4 className="font-bold text-red-900 text-sm">{lastObs.chaos_incident.type}</h4>
-                       <p className="text-xs text-red-700 mt-1">{lastObs.chaos_incident.description}</p>
+                       <h4 className="font-bold text-red-900 text-sm">{chaosIncident.type ?? "Unknown Incident"}</h4>
+                       <p className="text-xs text-red-700 mt-1">{chaosIncident.description ?? "No details available."}</p>
                        <div className="flex items-center gap-4 mt-3">
                           <Badge className="bg-red-200 text-red-900 hover:bg-red-200 border-none font-mono">
-                             INTENSITY: {(lastObs.chaos_incident.intensity * 100).toFixed(0)}%
+                             INTENSITY: {(Number(chaosIncident.intensity ?? 0) * 100).toFixed(0)}%
                           </Badge>
                           <span className="text-[10px] font-bold text-red-600 animate-pulse">CRITICAL ACTION REQUIRED</span>
                        </div>

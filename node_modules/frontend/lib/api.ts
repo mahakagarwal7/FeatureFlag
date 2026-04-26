@@ -93,8 +93,8 @@ export interface Observation {
   stakeholder_product_sentiment?: number;
   stakeholder_customer_sentiment?: number;
   stakeholder_overall_approval?: boolean;
-  stakeholder_feedback_dict?: Record<string, any>;
-  stakeholder_belief_dict?: Record<string, any>;
+  stakeholder_feedback_dict?: Record<string, unknown>;
+  stakeholder_belief_dict?: Record<string, unknown>;
 
   // Extended: Missions
   mission_name?: string;
@@ -109,26 +109,36 @@ export interface Observation {
   // Extended: Tools
   tools_connected?: number;
   tools_alerts_active?: number;
-  last_tool_result?: Record<string, any>;
-  tool_memory_summary?: Record<string, any>;
+  last_tool_result?: Record<string, unknown>;
+  tool_memory_summary?: Record<string, unknown>;
 
   // Extended: Chaos & HITL
-  chaos_incident?: Record<string, any>;
+  chaos_incident?: Record<string, unknown>;
   approval_status?: string;
-  extra_context: Record<string, any>;
+  extra_context: Record<string, unknown>;
+}
+
+export interface ActionHistoryItem {
+  action_type?: string;
+  target_percentage?: number;
+  reason?: string;
+  timestamp?: string;
 }
 
 export interface State {
   episode_id: string;
   step_count: number;
   total_reward: number;
+  done?: boolean;
   is_done: boolean;
   scenario_name: string;
   difficulty: string;
+  action_history?: ActionHistoryItem[];
+  rollout_history?: number[];
   history: Array<{
     observation?: Observation;
     reward?: number;
-    action?: any;
+    action?: ActionHistoryItem;
     [key: string]: unknown;
   }>;
 }
@@ -154,6 +164,105 @@ export interface DashboardData {
     adoption: { current: number; trend: number };
   };
   alerts: Array<Record<string, unknown>>;
+}
+
+type MonitoringDashboardResponse = {
+  health?: { score?: number; status?: string };
+  metrics?: {
+    error_rate?: number;
+    avg_latency_ms?: number;
+    uptime_seconds?: number;
+    active_users?: number;
+  };
+  alerts?: { recent?: Array<Record<string, unknown>> };
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object";
+}
+
+function normalizeState(raw: unknown): State {
+  const payload = isRecord(raw) ? raw : {};
+  const done = Boolean(payload.done);
+  const actionHistory = Array.isArray(payload.action_history)
+    ? (payload.action_history as ActionHistoryItem[])
+    : [];
+  const rolloutHistory = Array.isArray(payload.rollout_history)
+    ? (payload.rollout_history as number[])
+    : [];
+  const history = Array.isArray(payload.history)
+    ? (payload.history as State["history"])
+    : [];
+
+  return {
+    episode_id: typeof payload.episode_id === "string" ? payload.episode_id : "",
+    step_count: Number(payload.step_count ?? 0),
+    total_reward: Number(payload.total_reward ?? 0),
+    done,
+    is_done: done,
+    scenario_name: typeof payload.scenario_name === "string" ? payload.scenario_name : "unknown",
+    difficulty: typeof payload.difficulty === "string" ? payload.difficulty : "unknown",
+    action_history: actionHistory,
+    rollout_history: rolloutHistory,
+    history,
+  };
+}
+
+function normalizeDashboard(raw: unknown): DashboardData {
+  const payload = isRecord(raw) ? raw : {};
+  if ("summary" in payload && isRecord(payload.summary)) {
+    const summary = payload.summary as Record<string, unknown>;
+    const metrics = isRecord(payload.metrics) ? payload.metrics : {};
+    const alerts = Array.isArray(payload.alerts) ? payload.alerts : [];
+    const latencyMetric = isRecord(metrics.latency) ? metrics.latency : {};
+    const errorMetric = isRecord(metrics.error_rate) ? metrics.error_rate : {};
+    const adoptionMetric = isRecord(metrics.adoption) ? metrics.adoption : {};
+
+    return {
+      summary: {
+        health_score: Number(summary.health_score ?? 0),
+        error_rate: Number(summary.error_rate ?? 0),
+        latency_p99_ms: Number(summary.latency_p99_ms ?? 0),
+        uptime_seconds: Number(summary.uptime_seconds ?? 0),
+        status: String(summary.status ?? "unknown"),
+      },
+      metrics: {
+        latency: {
+          current: Number(latencyMetric.current ?? 0),
+          trend: Number(latencyMetric.trend ?? 0),
+        },
+        error_rate: {
+          current: Number(errorMetric.current ?? 0),
+          trend: Number(errorMetric.trend ?? 0),
+        },
+        adoption: {
+          current: Number(adoptionMetric.current ?? 0),
+          trend: Number(adoptionMetric.trend ?? 0),
+        },
+      },
+      alerts: alerts as Array<Record<string, unknown>>,
+    };
+  }
+
+  const monitoring = payload as MonitoringDashboardResponse;
+  const latency = Number(monitoring.metrics?.avg_latency_ms ?? 0);
+  const err = Number(monitoring.metrics?.error_rate ?? 0);
+
+  return {
+    summary: {
+      health_score: Number(monitoring.health?.score ?? 0),
+      error_rate: err,
+      latency_p99_ms: latency,
+      uptime_seconds: Number(monitoring.metrics?.uptime_seconds ?? 0),
+      status: String(monitoring.health?.status ?? "unknown"),
+    },
+    metrics: {
+      latency: { current: latency, trend: 0 },
+      error_rate: { current: err, trend: 0 },
+      adoption: { current: Number(monitoring.metrics?.active_users ?? 0), trend: 0 },
+    },
+    alerts: Array.isArray(monitoring.alerts?.recent) ? monitoring.alerts.recent : [],
+  };
 }
 
 export const api = {
@@ -247,12 +356,14 @@ export const api = {
 
   async getState(): Promise<State> {
     try {
-      return this.request<State>("/state", { method: "GET" });
+      const state = await this.request<unknown>("/state", { method: "GET" });
+      return normalizeState(state);
     } catch (error) {
       // Environment may not be initialized yet; reset once and retry.
       if (error instanceof Error && /not initialized|400/i.test(error.message)) {
         await this.reset();
-        return this.request<State>("/state", { method: "GET" });
+        const state = await this.request<unknown>("/state", { method: "GET" });
+        return normalizeState(state);
       }
       throw error;
     }
@@ -260,7 +371,8 @@ export const api = {
 
   async getDashboard(): Promise<DashboardData> {
     try {
-      return this.request<DashboardData>("/monitoring/dashboard", { method: "GET" });
+      const dashboard = await this.request<unknown>("/monitoring/dashboard", { method: "GET" });
+      return normalizeDashboard(dashboard);
     } catch (error) {
       // Monitoring can be disabled on backend; fall back to core state/health data.
       if (error instanceof Error && /(403|monitoring is not enabled)/i.test(error.message)) {

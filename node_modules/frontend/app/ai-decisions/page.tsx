@@ -2,9 +2,8 @@
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { BrainCircuit, Zap, ShieldCheck, MessageSquare, History, Activity } from "lucide-react";
+import { BrainCircuit, Zap, MessageSquare, History, Activity } from "lucide-react";
 import { 
-  LineChart, 
   Line, 
   XAxis, 
   YAxis, 
@@ -32,9 +31,14 @@ export default function AIDecisionsPage() {
   };
 
   useEffect(() => {
-    fetchState();
+    const initialFetch = setTimeout(() => {
+      void fetchState();
+    }, 0);
     const interval = setInterval(fetchState, 5000);
-    return () => clearInterval(interval);
+    return () => {
+      clearTimeout(initialFetch);
+      clearInterval(interval);
+    };
   }, []);
 
   const history = state?.history || [];
@@ -161,7 +165,7 @@ export default function AIDecisionsPage() {
                     </Badge>
                   </div>
                   <p className="text-xs leading-relaxed italic text-muted-foreground">
-                    "{recentDecisions[0]?.action?.reason || "Observing system baseline..."}"
+                    &quot;{recentDecisions[0]?.action?.reason || "Observing system baseline..."}&quot;
                   </p>
                </div>
             </CardContent>
@@ -183,6 +187,11 @@ export default function AIDecisionsPage() {
           <div className="space-y-0">
              {recentDecisions.length > 0 ? (
                recentDecisions.map((step, i) => (
+                 (() => {
+                   const actionType = step.action?.action_type ?? "MAINTAIN";
+                   const targetPercentage = step.action?.target_percentage ?? 0;
+                   const reason = step.action?.reason ?? "No reasoning provided.";
+                   return (
                  <div key={i} className="flex gap-4 border-b border-border/30 last:border-0 py-4 group">
                     <div className="flex flex-col items-center">
                        <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center text-[10px] font-bold">
@@ -195,41 +204,43 @@ export default function AIDecisionsPage() {
                           <div className="flex items-center gap-3">
                              <Badge className={cn(
                                "text-[10px] font-bold",
-                               step.action.action_type.includes("INCREASE") ? "bg-green-100 text-green-700 hover:bg-green-100" :
-                               step.action.action_type.includes("ROLLBACK") || step.action.action_type.includes("HALT") ? "bg-red-100 text-red-700 hover:bg-red-100" :
+                               actionType.includes("INCREASE") ? "bg-green-100 text-green-700 hover:bg-green-100" :
+                               actionType.includes("ROLLBACK") || actionType.includes("HALT") ? "bg-red-100 text-red-700 hover:bg-red-100" :
                                "bg-blue-100 text-blue-700 hover:bg-blue-100"
                              )}>
-                                {step.action.action_type}
+                                {actionType}
                              </Badge>
-                             <span className="text-sm font-bold">{step.action.target_percentage}% Rollout Target</span>
+                             <span className="text-sm font-bold">{targetPercentage}% Rollout Target</span>
                           </div>
                           <div className="flex items-center gap-2">
                              <Badge variant="outline" className={cn(
                                "text-[10px] font-mono",
                                (step.reward ?? 0) > 0 ? "text-green-600 border-green-200" : "text-red-600 border-red-200"
                              )}>
-                                REWARD: {step.reward > 0 ? "+" : ""}{step.reward?.toFixed(2)}
+                                REWARD: {(step.reward ?? 0) > 0 ? "+" : ""}{(step.reward ?? 0).toFixed(2)}
                              </Badge>
                           </div>
                        </div>
                        <div className="flex items-start gap-2 bg-muted/30 p-2.5 rounded-lg">
                           <MessageSquare className="h-3 w-3 text-muted-foreground mt-1 shrink-0" />
                           <p className="text-xs text-muted-foreground leading-normal">
-                             {step.action.reason}
+                             {reason}
                           </p>
                        </div>
                        <div className="flex items-center gap-4 pt-1">
                           <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
                              <Activity className="h-3 w-3" />
-                             Health: {(step.observation?.system_health_score * 100).toFixed(1)}%
+                             Health: {((step.observation?.system_health_score ?? 0) * 100).toFixed(1)}%
                           </div>
                           <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
                              <Zap className="h-3 w-3" />
-                             Latency: {step.observation?.latency_p99_ms.toFixed(0)}ms
+                             Latency: {(step.observation?.latency_p99_ms ?? 0).toFixed(0)}ms
                           </div>
                        </div>
                     </div>
                  </div>
+                   );
+                 })()
                ))
              ) : (
                <div className="py-20 text-center text-muted-foreground flex flex-col items-center gap-4">

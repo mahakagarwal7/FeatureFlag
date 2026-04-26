@@ -21,7 +21,7 @@ def main():
     org_a = TenantContext(
         tenant_id="org_a_finance",
         role="admin",
-        api_keys={"datadog": "dd_finance_789"},
+        api_keys={"github": "gh_finance_789"},
         config={"strict_mode": True}
     )
     manager.register_tenant(org_a)

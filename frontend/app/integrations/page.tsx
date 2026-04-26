@@ -5,40 +5,53 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { 
   MessageSquare, 
-  Database, 
   GitGraph, 
-  CheckCircle2, 
-  AlertCircle, 
   ExternalLink,
   RefreshCw,
-  Bell,
-  Activity
+  Bell
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 
 const IntegrationsPage = () => {
   const [loading, setLoading] = useState(false);
+  const [lastSync, setLastSync] = useState("Never");
+  const [isHealthy, setIsHealthy] = useState(false);
 
-  // Mock status for now, in a real app this would come from a /health/integrations endpoint
+  const syncIntegrations = async () => {
+    setLoading(true);
+    try {
+      const [health] = await Promise.all([
+        api.getHealth(),
+        api.getDashboard(),
+      ]);
+      setIsHealthy(Boolean(health?.environment_ready));
+      setLastSync(new Date().toLocaleTimeString());
+    } catch (error) {
+      console.error("Failed to sync integration status:", error);
+      setIsHealthy(false);
+      setLastSync("Sync failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const initialSync = setTimeout(() => {
+      void syncIntegrations();
+    }, 0);
+    return () => clearTimeout(initialSync);
+  }, []);
+
   const integrations = [
     {
       id: "slack",
       name: "Slack",
       description: "Automated rollout notifications and approval workflows.",
       icon: MessageSquare,
-      status: "connected",
-      details: "Connected to #deployments",
-      lastSync: "2 mins ago"
-    },
-    {
-      id: "datadog",
-      name: "Datadog",
-      description: "Real-time metrics sync for error rates and p99 latency.",
-      icon: Activity,
-      status: "connected",
-      details: "Fetching 12 metrics",
-      lastSync: "1 min ago"
+      status: isHealthy ? "connected" : "disconnected",
+      details: isHealthy ? "Alerts can be routed through backend automation" : "Backend unavailable",
+      lastSync
     },
     {
       id: "github",
@@ -47,7 +60,7 @@ const IntegrationsPage = () => {
       icon: GitGraph,
       status: "disconnected",
       details: "Requires OAuth",
-      lastSync: "Never"
+      lastSync
     }
   ];
 
@@ -58,9 +71,9 @@ const IntegrationsPage = () => {
           <h1 className="text-3xl font-bold tracking-tight">Integrations</h1>
           <p className="text-muted-foreground mt-1">Manage external connections and observability sync.</p>
         </div>
-        <Button variant="outline" size="sm" className="rounded-full">
-          <RefreshCw className="mr-2 h-4 w-4" />
-          Sync All
+        <Button variant="outline" size="sm" className="rounded-full" onClick={syncIntegrations} disabled={loading}>
+          <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+          {loading ? "Syncing..." : "Sync All"}
         </Button>
       </div>
 
@@ -116,10 +129,10 @@ const IntegrationsPage = () => {
         </CardHeader>
         <CardContent>
           <div className="rounded-lg border bg-background/50 p-4 font-mono text-xs">
-             POST http://localhost:8000/webhook/ingest
+             GET {(api.getApiBaseUrl() || "http://localhost:8000")}/monitoring/alerts
           </div>
           <p className="text-[10px] text-muted-foreground mt-4">
-            Supports generic JSON payloads with <code>error_rate</code>, <code>latency</code>, and <code>feature_name</code> fields.
+            Uses live backend monitoring routes for alert ingestion and observability polling.
           </p>
         </CardContent>
       </Card>

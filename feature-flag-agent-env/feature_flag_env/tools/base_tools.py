@@ -2,7 +2,7 @@
 feature_flag_env/tools/base_tools.py
 
 Abstract base class for external tool integrations.
-Extensible architecture for GitHub, Slack, PagerDuty, Datadog, etc.
+Extensible architecture for GitHub, Slack, PagerDuty, etc.
 """
 
 from abc import ABC, abstractmethod
@@ -34,7 +34,6 @@ class ExternalToolsInterface(ABC):
     Example implementations:
     - GitHubClient (see github_integration.py)
     - SlackClient (future)
-    - DatadogClient (future)
     """
     
     def __init__(self, tool_name: str, credentials: Optional[Dict[str, str]] = None):

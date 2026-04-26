@@ -18,7 +18,6 @@ dependencies = [
     
     # 🧮 Math & Simulation
     "numpy>=1.24.0",
-    "torch>=2.0.0",
     
     # 🤖 LLM Integration (OpenAI-compatible client)
     "groq>=0.4.0",

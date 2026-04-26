@@ -22,7 +22,7 @@ export function ThemeProvider({
   children: React.ReactNode;
   defaultTheme?: Theme;
   storageKey?: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }) {
   const [theme, setTheme] = React.useState<Theme>(
     () => (typeof window !== "undefined" && (localStorage.getItem(storageKey) as Theme)) || defaultTheme

@@ -23,7 +23,7 @@ from feature_flag_env.stakeholders import StakeholderPanel, StakeholderRole
 from feature_flag_env.missions import MissionTracker, get_mission
 from feature_flag_env.tools.tool_manager import ToolManager
 from feature_flag_env.tools.tool_interface import ToolCallRequest
-from feature_flag_env.tools.mock_adapters import MockGitHubTool, MockDatadogTool, MockSlackTool
+from feature_flag_env.tools.mock_adapters import MockGitHubTool, MockSlackTool
 from feature_flag_env.engine_plugins import ChaosEngine, ApprovalWorkflow
 from feature_flag_env.historical_patterns import CustomerProfile, PatternAnalyzer, DeploymentPattern
 from feature_flag_env.anomaly_detection import AnomalyDetector
@@ -181,7 +181,6 @@ class FeatureFlagEnvironment:
             if self._tool_manager is None:
                 self._tool_manager = ToolManager()
                 self._tool_manager.register(MockGitHubTool())
-                self._tool_manager.register(MockDatadogTool())
                 self._tool_manager.register(MockSlackTool())
             self._tool_manager.reset()
 

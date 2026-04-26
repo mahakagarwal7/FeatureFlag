@@ -2,7 +2,7 @@
 feature_flag_env/tools/real_adapters.py
 
 Real tool adapters that wrap the existing API clients
-(GitHubClient, DatadogClient, SlackClient) behind the
+(GitHubClient, SlackClient) behind the
 unified Tool interface.
 
 For production use when the agent should interact with
@@ -97,79 +97,6 @@ class RealGitHubTool(Tool):
                 errors.append("Missing required param: rollout_percentage")
         if self._client is None:
             errors.append("GitHubClient not configured")
-        return ValidationResult(valid=len(errors) == 0, errors=errors)
-
-
-# ---------------------------------------------------------------------------
-# RealDatadogTool
-# ---------------------------------------------------------------------------
-
-class RealDatadogTool(Tool):
-    """
-    Wraps existing DatadogClient behind the unified Tool interface.
-
-    Usage:
-        from feature_flag_env.tools.datadog_integration import DatadogClient
-        client = DatadogClient()
-        client.authenticate()
-        tool = RealDatadogTool(client)
-    """
-
-    def __init__(self, client=None, **kwargs):
-        super().__init__(
-            name="datadog",
-            mode=ToolMode.REAL,
-            available_actions=[
-                "get_error_rate",
-                "get_latency",
-                "get_active_alerts",
-            ],
-            timeout_ms=10000.0,
-            **kwargs,
-        )
-        self._client = client
-
-    def set_client(self, client) -> None:
-        self._client = client
-
-    def _execute(self, action_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        if self._client is None:
-            raise RuntimeError("DatadogClient not set.")
-        if self._client.status != ToolStatus.CONNECTED:
-            raise RuntimeError("DatadogClient not authenticated.")
-
-        if action_name == "get_error_rate":
-            resp = self._client.get_error_rate(
-                service_name=params["service_name"],
-                window_minutes=params.get("window_minutes", 5),
-            )
-        elif action_name == "get_latency":
-            resp = self._client.get_latency(
-                service_name=params["service_name"],
-                window_minutes=params.get("window_minutes", 5),
-            )
-        elif action_name == "get_active_alerts":
-            resp = self._client.get_active_alerts(
-                tags=params.get("tags", []),
-            )
-        else:
-            raise ValueError(f"Unknown action: {action_name}")
-
-        if not resp.success:
-            raise RuntimeError(resp.error or "Datadog API call failed")
-        return resp.data or {}
-
-    def validate(self, action_name: str, params: Dict[str, Any]) -> ValidationResult:
-        base = super().validate(action_name, params)
-        if not base.valid:
-            return base
-
-        errors = []
-        if action_name in ("get_error_rate", "get_latency"):
-            if "service_name" not in params:
-                errors.append("Missing required param: service_name")
-        if self._client is None:
-            errors.append("DatadogClient not configured")
         return ValidationResult(valid=len(errors) == 0, errors=errors)
 
 

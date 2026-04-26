@@ -8,9 +8,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { 
   ArrowLeft, 
   Save, 
-  History, 
-  Activity, 
-  Split, 
   Users, 
   Target, 
   ShieldAlert,
@@ -54,13 +51,22 @@ export default function FlagDetailPage() {
   };
 
   useEffect(() => {
-    fetchState();
+    const initialFetch = setTimeout(() => {
+      void fetchState();
+    }, 0);
     const interval = setInterval(fetchState, 5000);
-    return () => clearInterval(interval);
+    return () => {
+      clearTimeout(initialFetch);
+      clearInterval(interval);
+    };
   }, [id]);
 
   const lastObs: Observation | undefined = state?.history?.[state.history.length - 1]?.observation;
   const isBackendFlag = lastObs?.feature_name === id;
+  const patternRisk = Number(lastObs?.extra_context?.pattern_risk ?? 0);
+  const anomaly = (lastObs?.extra_context?.anomaly ?? null) as { is_anomaly?: boolean } | null;
+  const benchmarking = (lastObs?.extra_context?.benchmarking ?? null) as { percentile?: number } | null;
+  const percentile = Number(benchmarking?.percentile ?? 0);
 
   const handleRolloutChange = (val: number | number[] | readonly number[]) => {
     const newVal = typeof val === 'number' ? val : val[0];
@@ -250,14 +256,14 @@ export default function FlagDetailPage() {
             <CardContent className="space-y-4">
               <div className="flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">Pattern Risk</span>
-                <span className="font-bold">{((lastObs?.extra_context?.pattern_risk ?? 0) * 100).toFixed(0)}%</span>
+                <span className="font-bold">{(patternRisk * 100).toFixed(0)}%</span>
               </div>
-              <Progress value={(lastObs?.extra_context?.pattern_risk ?? 0) * 100} className="h-1.5" />
+              <Progress value={patternRisk * 100} className="h-1.5" />
               
               <div className="pt-4 border-t mt-4">
                 <div className="flex items-center justify-between text-xs mb-2">
                   <span className="text-muted-foreground font-medium uppercase">Active Anomaly</span>
-                  {lastObs?.extra_context?.anomaly?.is_anomaly ? (
+                  {anomaly?.is_anomaly ? (
                     <Badge variant="destructive" className="h-4 text-[9px]">CRITICAL</Badge>
                   ) : (
                     <Badge variant="outline" className="h-4 text-[9px] text-green-600 border-green-200">CLEAR</Badge>
@@ -276,7 +282,7 @@ export default function FlagDetailPage() {
             </CardHeader>
             <CardContent>
                <div className="text-center py-2">
-                  <span className="text-3xl font-bold">{(lastObs?.extra_context?.benchmarking?.percentile * 100 || 0).toFixed(0)}th</span>
+                  <span className="text-3xl font-bold">{(percentile * 100).toFixed(0)}th</span>
                   <p className="text-[10px] text-muted-foreground mt-1">Percentile Performance</p>
                </div>
             </CardContent>

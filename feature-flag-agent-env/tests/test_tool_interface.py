@@ -15,7 +15,7 @@ import sys, os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from feature_flag_env.tools.tool_interface import Tool, ToolResult, ToolCallRequest, ToolMode, ValidationResult
-from feature_flag_env.tools.mock_adapters import MockGitHubTool, MockDatadogTool, MockSlackTool
+from feature_flag_env.tools.mock_adapters import MockGitHubTool, MockSlackTool
 from feature_flag_env.tools.tool_manager import ToolManager, ToolMemory
 from feature_flag_env.server.feature_flag_environment import FeatureFlagEnvironment
 from feature_flag_env.models import FeatureFlagAction
@@ -39,27 +39,6 @@ def test_mock_github_tool():
     assert result.latency_ms >= 0
 
     print(f"   📊 Deployment status: {result.data['status']}")
-    print("   ✅ Passed")
-
-
-def test_mock_datadog_tool():
-    """MockDatadogTool should return metrics from env state."""
-    print("🧪 MockDatadogTool basic...")
-    tool = MockDatadogTool()
-    tool.set_env_state({"error_rate": 0.03, "latency_p99_ms": 150.0})
-
-    result = tool.call("get_error_rate", {"service_name": "payment-service"})
-    assert result.success
-    assert "latest_value" in result.data
-    # Should be close to 0.03 (+ noise)
-    assert abs(result.data["latest_value"] - 0.03) < 0.02
-
-    result2 = tool.call("get_latency", {"service_name": "payment-service"})
-    assert result2.success
-    assert abs(result2.data["latest_value"] - 150.0) < 20
-
-    print(f"   📊 Error rate: {result.data['latest_value']:.4f}")
-    print(f"   📊 Latency: {result2.data['latest_value']:.1f}ms")
     print("   ✅ Passed")
 
 
@@ -106,11 +85,6 @@ def test_validation_missing_params():
     """Should reject calls with missing required params."""
     print("🧪 Validation: missing params...")
 
-    datadog = MockDatadogTool()
-    result = datadog.call("get_error_rate", {})  # missing service_name
-    assert not result.success
-    assert "service_name" in result.error
-
     slack = MockSlackTool()
     result = slack.call("send_message", {})  # missing channel
     assert not result.success
@@ -141,11 +115,11 @@ def test_rate_limiting():
 def test_metrics_tracking():
     """Tool should track call count, errors, latency."""
     print("🧪 Metrics tracking...")
-    tool = MockDatadogTool()
-    tool.set_env_state({"error_rate": 0.02, "latency_p99_ms": 100.0})
+    tool = MockGitHubTool()
+    tool.set_env_state({"error_rate": 0.02, "rollout_percentage": 25.0})
 
-    tool.call("get_error_rate", {"service_name": "svc"})
-    tool.call("get_latency", {"service_name": "svc"})
+    tool.call("get_deployment_status", {"environment": "production"})
+    tool.call("get_cicd_status", {"branch": "main"})
     tool.call("bogus_action", {})  # validation failure — NOT counted in call_count
 
     metrics = tool.get_metrics()
@@ -167,10 +141,9 @@ def test_tool_manager_register():
     print("🧪 ToolManager register + dispatch...")
     manager = ToolManager()
     manager.register(MockGitHubTool())
-    manager.register(MockDatadogTool())
     manager.register(MockSlackTool())
 
-    assert manager.connected_count == 3
+    assert manager.connected_count == 2
     assert "github" in manager.tool_names
 
     manager.update_env_state({"error_rate": 0.02, "latency_p99_ms": 100})
@@ -289,16 +262,16 @@ def test_env_tool_call_prompt_string():
         target_percentage=0.0,
         reason="Check metrics",
         tool_call={
-            "tool_name": "datadog",
-            "action_name": "get_error_rate",
-            "params": {"service_name": "payment-svc"},
+            "tool_name": "github",
+            "action_name": "get_cicd_status",
+            "params": {"branch": "main"},
         },
     )
     response = env.step(action)
     prompt = response.observation.to_prompt_string()
 
     assert "LAST TOOL RESULT" in prompt
-    assert "datadog" in prompt
+    assert "github" in prompt
 
     print(f"   📊 Prompt length: {len(prompt)} chars")
     print("   ✅ Passed")
@@ -407,7 +380,6 @@ def main():
     results = [
         # Tool interface
         test_mock_github_tool(),
-        test_mock_datadog_tool(),
         test_mock_slack_tool(),
 
         # Validation & failure

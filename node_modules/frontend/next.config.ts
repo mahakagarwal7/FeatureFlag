@@ -1,9 +1,9 @@
 import type { NextConfig } from "next";
+import path from "path";
 
 const nextConfig: NextConfig = {
-  /* config options here */
-  experimental: {
-    // Turbopack settings for Next.js 15+
+  turbopack: {
+    root: path.resolve(__dirname),
   },
   logging: {
     fetches: {
