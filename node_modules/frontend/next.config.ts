@@ -3,9 +3,8 @@ import path from "path";
 
 const nextConfig: NextConfig = {
   /* config options here */
-  experimental: {
-    outputFileTracingRoot: path.join(process.cwd(), '../../'),
-  },
+  output: 'export',
+  outputFileTracingRoot: path.join(process.cwd(), '../../'),
   logging: {
     fetches: {
       fullUrl: true,

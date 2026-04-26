@@ -22,20 +22,30 @@ import {
   CartesianGrid,
   BarChart,
   Bar,
-  Cell
+  Cell,
+  ResponsiveContainer
 } from "recharts";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { useMemo } from "react";
-import { Observation } from "@/lib/api";
+import { useMemo, useEffect, useState } from "react";
+import { Observation, api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useEnv } from "@/components/env/env-provider";
 
 
 const Dashboard = () => {
-  const { dashboard: data, state, connectionState, connectionText } = useEnv();
+  const { 
+    dashboard: data, 
+    state, 
+    connectionState, 
+    connectionText, 
+    isSimulating, 
+    setIsSimulating, 
+    runSimulationStep, 
+    fetchData 
+  } = useEnv();
   const loading = useMemo(() => connectionState === "checking" && !data && !state, [connectionState, data, state]);
 
   useEffect(() => {
@@ -243,7 +253,7 @@ const Dashboard = () => {
           <CardContent>
             <div className="h-[300px] w-full">
               <ResponsiveContainer width="100%" height={300} minHeight={300}>
-                <AreaChart data={state?.history?.map(h => ({ 
+                <AreaChart data={state?.history ? state.history.map(h => ({ 
                   time: h.observation?.time_step, 
                   rollout: h.observation?.current_rollout_percentage,
                   error: (h.observation?.error_rate ?? 0) * 100
@@ -277,8 +287,9 @@ const Dashboard = () => {
                   animationDuration={1000}
                 />
               </AreaChart>
-            </div>
-          </CardContent>
+            </ResponsiveContainer>
+          </div>
+        </CardContent>
         </Card>
 
         {/* Stakeholder Sentiments */}

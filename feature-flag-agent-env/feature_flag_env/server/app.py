@@ -14,6 +14,7 @@ environment remotely, which is required for OpenEnv specification.
 """
 
 from fastapi import FastAPI, HTTPException, Request, Depends
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, APIKeyHeader
 from fastapi.responses import RedirectResponse
@@ -840,6 +841,19 @@ if DATABASE_AVAILABLE:
     async def get_database_stats():
         """Get SQLite row counts for episode and audit events."""
         return database.get_stats()
+
+
+# =========================
+# STATIC FILE SERVING
+# =========================
+# This allows the backend to serve the frontend UI in a unified deployment.
+# We mount it last so that API routes take precedence.
+static_dir = Path(__file__).resolve().parents[2] / "static"
+if static_dir.exists():
+    logger.info(f"[*] Serving static files from {static_dir}")
+    app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="static")
+else:
+    logger.info("[-] Static directory not found; UI will not be served by backend")
 
 
 def main() -> None:

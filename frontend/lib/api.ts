@@ -118,6 +118,14 @@ export interface Observation {
   extra_context: Record<string, unknown>;
 }
 
+export interface ActionHistoryItem {
+  action_type: string;
+  target_percentage: number;
+  reason: string;
+  timestamp: string;
+  tool_call?: Record<string, unknown> | null;
+}
+
 export interface State {
   episode_id: string;
   step_count: number;
@@ -186,6 +194,37 @@ export interface MonitoringAlert {
   message?: string;
   details?: Record<string, unknown>;
   [key: string]: unknown;
+}
+
+function normalizeDashboard(raw: any): DashboardData {
+  const data = (raw && typeof raw === "object") ? raw : {};
+  const summary = data.summary || {};
+  const metrics = data.metrics || {};
+  
+  return {
+    summary: {
+      health_score: Number(summary.health_score ?? 0),
+      error_rate: Number(summary.error_rate ?? 0),
+      latency_p99_ms: Number(summary.latency_p99_ms ?? 0),
+      uptime_seconds: Number(summary.uptime_seconds ?? 0),
+      status: String(summary.status ?? "unknown"),
+    },
+    metrics: {
+      latency: {
+        current: Number(metrics.latency?.current ?? 0),
+        trend: Number(metrics.latency?.trend ?? 0),
+      },
+      error_rate: {
+        current: Number(metrics.error_rate?.current ?? 0),
+        trend: Number(metrics.error_rate?.trend ?? 0),
+      },
+      adoption: {
+        current: Number(metrics.adoption?.current ?? 0),
+        trend: Number(metrics.adoption?.trend ?? 0),
+      },
+    },
+    alerts: Array.isArray(data.alerts) ? data.alerts : [],
+  };
 }
 
 export const api = {
@@ -282,7 +321,6 @@ export const api = {
       const rawState = await this.request<unknown>("/state", { method: "GET" });
       const stateObj = (rawState && typeof rawState === "object") ? (rawState as Record<string, unknown>) : {};
       
-      // The Python backend serves 'rollout_history' and 'action_history' instead of a singular 'history' array
       const historyValue = stateObj["history"];
       const rolloutHistory = stateObj["rollout_history"];
       const actionHistory = stateObj["action_history"];
@@ -315,7 +353,6 @@ export const api = {
       }
       return stateObj as unknown as State;
     } catch (error) {
-      // Environment may not be initialized yet; reset once and retry.
       if (error instanceof Error && /not initialized|400/i.test(error.message)) {
         await this.reset();
         return this.getState();
@@ -329,7 +366,6 @@ export const api = {
       const dashboard = await this.request<unknown>("/monitoring/dashboard", { method: "GET" });
       return normalizeDashboard(dashboard);
     } catch (error) {
-      // Monitoring can be disabled on backend; fall back to core state/health data.
       if (error instanceof Error && /(403|monitoring is not enabled)/i.test(error.message)) {
         const [health, state] = await Promise.all([
           this.getHealth(),
