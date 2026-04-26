@@ -40,6 +40,9 @@ if (Get-Command hf -ErrorAction SilentlyContinue) {
 }
 
 & $hfCli auth login --token $Token --add-to-git-credential --force | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    throw "Hugging Face login failed. Verify HF_TOKEN is valid and has write scope."
+}
 
 $hfUrl = "https://huggingface.co/spaces/$SpaceId"
 
