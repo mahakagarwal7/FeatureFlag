@@ -44,6 +44,13 @@ In **Settings** page:
 - Save your API base URL if it differs from `.env`.
 - Use **Test** to verify backend connectivity.
 
+## UI pages
+
+- **Dashboard** (`/`): core simulation overview + charts
+- **Control** (`/flags`): the current backend simulation “flag” and manual rollout control
+- **Monitoring** (`/monitoring`): `/monitoring/*` endpoints and raw `/metrics` output
+- **AI Decisions** (`/ai-decisions`): action history + rewards
+
 ## Notes
 
 - Backend CORS allowlist is configured through `FRONTEND_ORIGINS` in backend `.env`.

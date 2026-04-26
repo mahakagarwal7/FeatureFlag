@@ -159,21 +159,15 @@ export default function SettingsPage() {
               <Webhook className="h-5 w-5 text-primary" /> Integrations
             </CardTitle>
             <CardDescription>
-              Connect to external services like Datadog or Slack.
+              External integrations are not configured in this UI.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex items-center justify-between p-4 rounded-lg border border-border/50 bg-background">
-              <div className="flex items-center gap-4">
-                <div className="h-10 w-10 bg-purple-500/10 rounded-lg flex items-center justify-center">
-                  <span className="font-bold text-purple-600">DD</span>
-                </div>
-                <div>
-                  <p className="font-medium">Datadog</p>
-                  <p className="text-sm text-muted-foreground">Export evaluation metrics and logs.</p>
-                </div>
-              </div>
-              <Button variant="outline" onClick={() => setStatus("Datadog integration setup is currently a guided/manual step.")}>Connect</Button>
+            <div className="rounded-lg border border-border/50 bg-background p-4">
+              <p className="text-sm text-muted-foreground">
+                Monitoring is available via the backend monitoring endpoints. Configure any third-party
+                integrations on the backend as needed.
+              </p>
             </div>
           </CardContent>
         </Card>

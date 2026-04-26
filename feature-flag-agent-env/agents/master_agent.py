@@ -7,7 +7,6 @@ from typing import Dict, Any, Optional
 from agents.llm_agent import LLMAgent
 from feature_flag_env.models import FeatureFlagObservation, FeatureFlagAction
 from feature_flag_env.tools.github_integration import GitHubClient
-from feature_flag_env.tools.datadog_integration import DatadogClient
 from feature_flag_env.tools.slack_integration import SlackClient
 
 class MasterAgent(LLMAgent):
@@ -17,7 +16,6 @@ class MasterAgent(LLMAgent):
     Combines:
     - LLM Decision Making
     - GitHub Deployment & Pipeline Awareness
-    - Datadog Real-time Metrics
     - Slack Notifications
     """
     
@@ -26,12 +24,10 @@ class MasterAgent(LLMAgent):
         
         # Initialize Tools
         self.github = GitHubClient()
-        self.datadog = DatadogClient()
         self.slack = SlackClient()
         
         # Authenticate Tools (failures are handled gracefully)
         self.github_auth = self.github.authenticate()
-        self.datadog_auth = self.datadog.authenticate()
         self.slack_auth = self.slack.authenticate()
         
         # Slack Channel auto-discovery
@@ -47,7 +43,7 @@ class MasterAgent(LLMAgent):
         self.service_name = os.getenv("GITHUB_REPO", "unknown-service")
         
     def _fetch_external_context(self) -> str:
-        """Fetch context from GitHub and Datadog to feed into LLM."""
+        """Fetch context from GitHub to feed into LLM."""
         context = "\n--- EXTERNAL CONTEXT ---\n"
         
         # GitHub Context
@@ -64,14 +60,6 @@ class MasterAgent(LLMAgent):
                 context += f"GitHub Pipeline: {summary['success_rate']:.1f}% success rate\n"
         else:
             context += "GitHub: Not connected\n"
-            
-        # Datadog Context
-        if self.datadog_auth.success:
-            alerts = self.datadog.get_active_alerts(tags=[f"service:{self.service_name}"])
-            if alerts.success:
-                context += f"Datadog Alerts: {alerts.data['total_alerts']} active\n"
-        else:
-            context += "Datadog: Not connected\n"
             
         return context
 
@@ -123,7 +111,7 @@ Simulation Observation:
 
 Based on the above EXTERNAL CONTEXT and Simulation facts, make a rollout decision.
 Priority: 
-1. If External Pipeline is failing or Datadog has alerts, be EXTREMELY conservative (Maintain or Decrease).
+1. If External Pipeline is failing, be EXTREMELY conservative (Maintain or Decrease).
 2. If metrics are healthy, aim for steady rollout.
 
 Allowed action_type: INCREASE_ROLLOUT, DECREASE_ROLLOUT, MAINTAIN, HALT_ROLLOUT, FULL_ROLLOUT, ROLLBACK

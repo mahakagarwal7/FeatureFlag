@@ -572,11 +572,25 @@ class RLAgent:
     def load_model(self, model_path: Optional[str] = None):
         path = model_path or self.model_path
         checkpoint = torch.load(path, map_location=self.device)
-        self.policy_net.load_state_dict(checkpoint["policy_net"])
-        if "target_net" in checkpoint:
-            self.target_net.load_state_dict(checkpoint["target_net"])
-        else:
+
+        def _load_compatible(module: torch.nn.Module, state_dict: dict) -> None:
+            current = module.state_dict()
+            filtered = {}
+            for k, v in state_dict.items():
+                if k in current and hasattr(v, "shape") and hasattr(current[k], "shape") and v.shape == current[k].shape:
+                    filtered[k] = v
+            module.load_state_dict(filtered, strict=False)
+
+        try:
+            _load_compatible(self.policy_net, checkpoint["policy_net"])
+            if "target_net" in checkpoint:
+                _load_compatible(self.target_net, checkpoint["target_net"])
+            else:
+                self.target_net.load_state_dict(self.policy_net.state_dict())
+        except Exception:
+            # If checkpoint is incompatible, keep randomly initialized networks.
             self.target_net.load_state_dict(self.policy_net.state_dict())
+
         self.epsilon = float(checkpoint.get("epsilon", self.epsilon))
         self.total_steps = int(checkpoint.get("total_steps", self.total_steps))
 

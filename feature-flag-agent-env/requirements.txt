@@ -29,7 +29,6 @@ openai>=1.0.0
 
 # External Tool Integrations
 PyGithub>=1.60.0
-datadog-api-client>=2.0.0
 slack_sdk>=3.20.0
 
 # Utilities

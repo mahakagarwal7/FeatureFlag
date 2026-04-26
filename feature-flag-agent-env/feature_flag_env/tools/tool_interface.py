@@ -46,7 +46,7 @@ class ToolResult(BaseModel):
 class ToolCallRequest(BaseModel):
     """Agent's request to invoke a specific tool action."""
 
-    tool_name: str             # "github", "datadog", "slack"
+    tool_name: str             # e.g. "github", "slack"
     action_name: str           # "get_deployment_status", "get_error_rate", etc.
     params: Dict[str, Any] = Field(default_factory=dict)
 

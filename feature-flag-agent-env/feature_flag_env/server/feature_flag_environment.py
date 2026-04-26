@@ -23,7 +23,7 @@ from feature_flag_env.stakeholders import StakeholderPanel, StakeholderRole
 from feature_flag_env.missions import MissionTracker, get_mission
 from feature_flag_env.tools.tool_manager import ToolManager
 from feature_flag_env.tools.tool_interface import ToolCallRequest
-from feature_flag_env.tools.mock_adapters import MockGitHubTool, MockDatadogTool, MockSlackTool
+from feature_flag_env.tools.mock_adapters import MockGitHubTool, MockSlackTool
 from feature_flag_env.engine_plugins import ChaosEngine, ApprovalWorkflow
 from feature_flag_env.historical_patterns import CustomerProfile, PatternAnalyzer, DeploymentPattern
 from feature_flag_env.anomaly_detection import AnomalyDetector
@@ -181,7 +181,6 @@ class FeatureFlagEnvironment:
             if self._tool_manager is None:
                 self._tool_manager = ToolManager()
                 self._tool_manager.register(MockGitHubTool())
-                self._tool_manager.register(MockDatadogTool())
                 self._tool_manager.register(MockSlackTool())
             self._tool_manager.reset()
 
@@ -229,6 +228,8 @@ class FeatureFlagEnvironment:
         # Populate extended observation fields at reset
         observation = self._populate_extended_obs(observation)
         self._update_analytics(observation)
+        
+        self._state.observation_history.append(observation)
 
         self.previous_observation = observation
         return observation
@@ -256,6 +257,7 @@ class FeatureFlagEnvironment:
                 obs_out.reward = -1.0
                 obs_out.time_step = self._state.step_count
                 obs_out = self._populate_extended_obs(obs_out)
+                self._state.observation_history.append(obs_out)
                 return StepResponse(
                     observation=obs_out,
                     reward=-1.0,
@@ -413,6 +415,7 @@ class FeatureFlagEnvironment:
         observation.done = done
         observation.reward = reward
 
+        self._state.observation_history.append(observation)
         self.previous_observation = observation
 
         info = {
@@ -691,6 +694,7 @@ class FeatureFlagEnvironment:
         self._state.done = done
         observation.done = done
 
+        self._state.observation_history.append(observation)
         self.previous_observation = observation
 
         info = {

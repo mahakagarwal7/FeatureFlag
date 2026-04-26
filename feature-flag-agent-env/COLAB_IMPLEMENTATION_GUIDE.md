@@ -6,7 +6,7 @@ We have completely transformed the enterprise feature flag reinforcement learnin
 ### 1. Tool Integration Layer 
 *   **Unified Abstraction (`tool_interface.py`)**: Built a generalized `Tool` abstract class providing built-in rate-limiting, timing, and error handling.
 *   **Tool Orchestration (`tool_manager.py`)**: Built an intelligent `ToolManager` maintaining a rolling tool memory buffer injected straight into candidate states.
-*   **Dual Mode Tools**: Built comprehensive mock tools for deterministic RL training (without exposing secrets) and live adapters for production (wrapping actual third-party Datadog/Github/Slack APIs).
+*   **Dual Mode Tools**: Built comprehensive mock tools for deterministic RL training (without exposing secrets) and live adapters for production (wrapping actual third-party GitHub/Slack APIs).
 *   **Action Parity**: Integrated `TOOL_CALL` cleanly into the simulator discrete action space without bypassing core environment logic.
 
 ### 2. Multi-Stakeholder Feedback System

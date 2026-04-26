@@ -77,7 +77,6 @@ class ToolManager:
     Usage:
         manager = ToolManager()
         manager.register(MockGitHubTool())
-        manager.register(MockDatadogTool())
         manager.register(MockSlackTool())
 
         result = manager.execute(ToolCallRequest(

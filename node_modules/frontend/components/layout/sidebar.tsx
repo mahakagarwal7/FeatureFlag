@@ -19,13 +19,13 @@ const sidebarNavItems = [
     icon: LayoutDashboard,
   },
   {
-    title: "Feature Flags",
+    title: "Control",
     href: "/flags",
     icon: Flag,
   },
   {
-    title: "Experiments",
-    href: "/experiments",
+    title: "Monitoring",
+    href: "/monitoring",
     icon: Beaker,
   },
   {

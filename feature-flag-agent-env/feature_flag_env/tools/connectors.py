@@ -79,18 +79,6 @@ class JenkinsConnector(Connector):
         return {"queue_id": 7777}
 
 
-class DatadogConnector(Connector):
-    def fetch_data(self, endpoint: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
-        if not self.is_connected:
-            raise ConnectionError("Datadog API key is missing or invalid.")
-        return {"series": [{"pointlist": [[time.time(), 0.015]]}]}
-
-    def send_action(self, endpoint: str, payload: Dict[str, Any] = None) -> Dict[str, Any]:
-        if not self.is_connected:
-            raise ConnectionError("Datadog API key is missing or invalid.")
-        return {"status": "event_posted"}
-
-
 class SlackConnector(Connector):
     def fetch_data(self, endpoint: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
         if not self.is_connected:
