@@ -79,7 +79,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "Pushing to Hugging Face Space..."
-git push $RemoteName HEAD:main
+git push $RemoteName HEAD:main --force
 if ($LASTEXITCODE -ne 0) {
     throw "Push failed. Ensure the Space exists and your token has write access."
 }
