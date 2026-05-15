@@ -12,7 +12,9 @@ from __future__ import annotations
 from collections import deque
 from typing import Any, Dict, List, Optional
 
+import os
 from .tool_interface import Tool, ToolCallRequest, ToolResult
+from .connectors import GitHubClient, SlackClient
 
 
 # ---------------------------------------------------------------------------
@@ -89,6 +91,43 @@ class ToolManager:
     def __init__(self, memory_size: int = 20):
         self._tools: Dict[str, Tool] = {}
         self.memory = ToolMemory(max_size=memory_size)
+        self._load_adapters()
+
+    def _load_adapters(self):
+        """Initialize real-world tool adapters."""
+        self.adapters = {
+            "github": GitHubClient(token=os.getenv("GITHUB_TOKEN")),
+            "slack": SlackClient(bot_token=os.getenv("SLACK_BOT_TOKEN")),
+        }
+
+    def _call_adapter(self, name: str, method: str, *args, **kwargs):
+        """Invoke an adapter method and return ToolResult."""
+        if name not in self.adapters:
+            return ToolResult(
+                success=False, 
+                tool_name=name, 
+                action_name=method, 
+                error=f"Unknown adapter: {name}"
+            )
+        
+        adapter = self.adapters[name]
+        if not hasattr(adapter, method):
+            return ToolResult(
+                success=False, 
+                tool_name=name, 
+                action_name=method, 
+                error=f"Adapter '{name}' has no method '{method}'"
+            )
+        
+        try:
+            return getattr(adapter, method)(*args, **kwargs)
+        except Exception as e:
+            return ToolResult(
+                success=False, 
+                tool_name=name, 
+                action_name=method, 
+                error=str(e)
+            )
 
     def register(self, tool: Tool) -> None:
         """Register a tool by its name."""
@@ -131,6 +170,16 @@ class ToolManager:
         """
         tool = self._tools.get(request.tool_name)
         if tool is None:
+            # Fallback: Check if we have a real-world adapter for this tool
+            if request.tool_name in getattr(self, "adapters", {}):
+                result = self._call_adapter(
+                    request.tool_name, 
+                    request.action_name, 
+                    **request.params
+                )
+                self.memory.add(result)
+                return result
+
             result = ToolResult(
                 success=False,
                 tool_name=request.tool_name,

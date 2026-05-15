@@ -477,3 +477,64 @@ def get_status_summary() -> str:
             lines.append(f"  ... and {len(alerts) - 5} more")
     
     return "\n".join(lines)
+
+
+class MonitoringManager:
+    _instance = None
+    
+    def __init__(self):
+        self.enabled = False
+        self.alerting = False
+        self.prometheus = False
+    
+    @classmethod
+    def get_instance(cls):
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+    
+    def init_app(self, app):
+        """ Bind monitoring to app config and register middleware."""
+        # In FastAPI, we usually use environment variables or app.state
+        # We'll support app.config if it exists (for Flask compatibility) or fallback to env
+        self.enabled = getattr(app, "config", {}).get("ENABLE_MONITORING", os.getenv("ENABLE_MONITORING", "true").lower() == "true")
+        self.alerting = getattr(app, "config", {}).get("ENABLE_ALERTING", os.getenv("ENABLE_ALERTING", "true").lower() == "true")
+        self.prometheus = getattr(app, "config", {}).get("ENABLE_PROMETHEUS", os.getenv("ENABLE_PROMETHEUS", "true").lower() == "true")
+        
+        if self.enabled and hasattr(app, 'middleware'):
+            # For FastAPI: add middleware to record request metrics
+            @app.middleware("http")
+            async def monitor_requests(request, call_next):
+                import time
+                start = time.time()
+                try:
+                    response = await call_next(request)
+                    duration = time.time() - start
+                    
+                    self.record_api_call(
+                        endpoint=request.url.path,
+                        method=request.method,
+                        status_code=response.status_code,
+                        duration_ms=duration * 1000,
+                    )
+                    return response
+                except Exception as e:
+                    duration = time.time() - start
+                    self.record_api_call(
+                        endpoint=request.url.path,
+                        method=request.method,
+                        status_code=500,
+                        duration_ms=duration * 1000,
+                    )
+                    raise e
+        
+        if self.enabled:
+            logger.info("[MONITORING] MonitoringManager initialized and middleware attached.")
+        
+        return self
+    
+    def record_api_call(self, endpoint, method, status_code, duration_ms):
+        """Record a single API call for metrics aggregation."""
+        # Use the global record_api_call function
+        from .monitoring import record_api_call as global_record_api_call
+        global_record_api_call(endpoint, method, status_code, duration_ms)

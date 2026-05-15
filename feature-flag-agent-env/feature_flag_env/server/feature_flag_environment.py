@@ -763,3 +763,26 @@ def make_environment(
         hitl_enabled=hitl_enabled,
         benchmarking_config=benchmarking_config,
     )
+
+
+# TASK-SPECIFIC FACTORY HELPERS (For direct task imports)
+
+def make_task1_environment():
+    """Factory for Task 1: Safe Rollout (easy difficulty)."""
+    from feature_flag_env.tasks.task1_safe_rollout import make_task1_environment as _make_task1_environment
+
+    return _make_task1_environment()
+
+
+def make_task2_environment():
+    """Factory for Task 2: Risk-Aware Scaling (medium difficulty)."""
+    from feature_flag_env.tasks.task2_risk_aware import make_task2_environment as _make_task2_environment
+
+    return _make_task2_environment()
+
+
+def make_task3_environment():
+    """Factory for Task 3: Multi-Objective Optimization (hard difficulty)."""
+    from feature_flag_env.tasks.task3_multi_objective import make_task3_environment as _make_task3_environment
+
+    return _make_task3_environment()

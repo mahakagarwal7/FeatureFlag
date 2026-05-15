@@ -29,8 +29,16 @@ class DatabaseConfig:
     timeout_seconds: float = float(os.getenv("DATABASE_TIMEOUT_SECONDS", "5.0"))
 
 
-class SQLiteStore:
+class DatabaseManager:
     """Small SQLite helper with best-effort persistence semantics."""
+    
+    _instance = None
+    
+    @classmethod
+    def get_instance(cls):
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
 
     def __init__(self):
         self.config = DatabaseConfig()
@@ -39,6 +47,35 @@ class SQLiteStore:
 
         if self.config.enabled:
             self.initialize()
+
+    def init_app(self, app) -> "SQLiteStore":
+        """
+        Initialize database connection using app config (if provided).
+        Called during application startup.
+        
+        Args:
+            app: FastAPI or Flask app instance (with optional config dict)
+        
+        Returns:
+            self for chaining
+        """
+        # Allow config override from app if available
+        if hasattr(app, 'config'):
+            db_path = app.config.get("DATABASE_PATH", self.config.path)
+            timeout = float(app.config.get("DATABASE_TIMEOUT_SECONDS", self.config.timeout_seconds))
+            self.config.path = db_path
+            self.config.timeout_seconds = timeout
+        
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(self.config.path) or ".", exist_ok=True)
+        
+        # Initialize if enabled
+        if self.config.enabled:
+            self.initialize()
+            logger.info(f"Database initialized at {self.config.path}")
+        
+        return self
+
 
     @contextmanager
     def _connect(self):
@@ -301,4 +338,6 @@ class SQLiteStore:
             logger.warning("SQLite audit write failed: %s", exc)
 
 
-database = SQLiteStore()
+# Compatibility aliases
+SQLiteStore = DatabaseManager
+database = DatabaseManager.get_instance()

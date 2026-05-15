@@ -31,7 +31,7 @@ if load_dotenv is not None:
 class LLMAgent:
     def __init__(self, model: str = ""):
         requested_provider = os.getenv("LLM_PROVIDER", "auto").strip().lower()
-        if requested_provider not in {"auto", "openai", "hf", "huggingface"}:
+        if requested_provider not in {"auto", "openai", "hf", "huggingface", "groq"}:
             requested_provider = "auto"
 
         openai_api_key = os.getenv("OPENAI_API_KEY")
@@ -42,6 +42,8 @@ class LLMAgent:
             self.provider = "hf"
         elif requested_provider == "openai":
             self.provider = "openai"
+        elif requested_provider == "groq":
+            self.provider = "groq"
         else:
             self.provider = "hf" if hf_token and not (openai_api_key or generic_api_key) else "openai"
 
@@ -68,29 +70,67 @@ class LLMAgent:
         self.api_failures = 0
         self.last_error = None
 
-        if not self.api_key:
-            print(
-                "WARNING: API_KEY/HF_TOKEN/OPENAI_API_KEY not set. Using fallback.",
-                file=sys.stderr,
-            )
-            self.use_baseline = True
-        else:
-            self.use_baseline = False
-            self.client = None
-            if self.provider == "openai":
-                try:
-                    from openai import OpenAI
-                    self.client = OpenAI(
-                        api_key=self.api_key,
-                        base_url=self.api_base_url,
-                        timeout=self.timeout_seconds,
+        self.use_baseline = False
+        self.client = None
+
+        if self.provider == "groq":
+            try:
+                from groq import Groq  # Requires: pip install groq
+                
+                # Get API key from environment (with fallback)
+                groq_api_key = (
+                    os.getenv("GROQ_API_KEY")
+                    or os.getenv("API_KEY")
+                    or os.getenv("LLM_API_KEY")
+                )
+                
+                if not groq_api_key:
+                    print("WARNING: GROQ_API_KEY not set. Using fallback agent.", file=sys.stderr)
+                    self.use_baseline = True
+                    self.client = None
+                else:
+                    # Initialize Groq client with config
+                    self.client = Groq(
+                        api_key=groq_api_key,
+                        timeout=int(os.getenv("GROQ_TIMEOUT_SECONDS", "20")),
+                        max_retries=int(os.getenv("GROQ_MAX_RETRIES", "2")),
                     )
-                except ImportError:
-                    print("WARNING: openai package not installed. Using fallback.", file=sys.stderr)
-                    self.use_baseline = True
-                except Exception as exc:
-                    print(f"WARNING: Failed to initialize OpenAI client: {exc}. Using fallback.", file=sys.stderr)
-                    self.use_baseline = True
+                    self.use_baseline = False
+                    
+                    # Optional: Log initialization for debugging
+                    if os.getenv("FF_DEBUG_API", "0") == "1":
+                        print(f"[LLM DEBUG] Groq client initialized (model={self.model})", file=sys.stderr)
+                        
+            except ImportError:
+                print("WARNING: groq package not installed. Install with: pip install groq", file=sys.stderr)
+                self.use_baseline = True
+                self.client = None
+            except Exception as exc:
+                print(f"WARNING: Failed to initialize Groq client: {exc}", file=sys.stderr)
+                self.use_baseline = True
+                self.client = None
+        else:
+            if not self.api_key:
+                print(
+                    "WARNING: API_KEY/HF_TOKEN/OPENAI_API_KEY not set. Using fallback.",
+                    file=sys.stderr,
+                )
+                self.use_baseline = True
+            else:
+                if self.provider == "openai":
+                    try:
+                        from openai import OpenAI
+                        self.client = OpenAI(
+                            api_key=self.api_key,
+                            base_url=self.api_base_url,
+                            timeout=self.timeout_seconds,
+                        )
+                    except ImportError:
+                        print("WARNING: openai package not installed. Using fallback.", file=sys.stderr)
+                        self.use_baseline = True
+                    except Exception as exc:
+                        print(f"WARNING: Failed to initialize OpenAI client: {exc}. Using fallback.", file=sys.stderr)
+                        self.use_baseline = True
 
         if self.debug:
             status = "enabled" if not self.use_baseline else "fallback"
@@ -254,6 +294,31 @@ class LLMAgent:
 
         raise ValueError("Unexpected Hugging Face response format")
 
+    def _call_llm(self, prompt: str) -> str:
+        """ Unified LLM call supporting Groq, OpenAI, and HF providers."""
+        
+        if self.provider == "groq" and self.client is not None:
+            # Groq uses OpenAI-compatible API
+            response = self.client.chat.completions.create(
+                model=self.model,  # e.g., "llama3-8b-8192"
+                messages=[
+                    {"role": "system", "content": "You are a feature flag rollout agent. Output JSON only."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=float(os.getenv("LLM_TEMPERATURE", "0.7")),
+                max_tokens=int(os.getenv("LLM_MAX_TOKENS", "500")),
+                response_format={"type": "json_object"},  # Ensure JSON output
+            )
+            return response.choices[0].message.content
+        
+        elif self.provider == "openai":
+            return self._call_openai_completion(prompt)
+            
+        elif self.provider == "hf":
+            return self._call_hf_completion(prompt)
+            
+        raise RuntimeError(f"LLM provider '{self.provider}' not properly configured")
+
     def decide(self, observation: FeatureFlagObservation, history):
         if self.use_baseline:
             if self.debug:
@@ -289,10 +354,7 @@ Respond with JSON only (no markdown, no prose):
             last_exc: Exception | None = None
             for attempt in range(self.max_retries + 1):
                 try:
-                    if self.provider == "hf":
-                        response = self._call_hf_completion(prompt)
-                    else:
-                        response = self._call_openai_completion(prompt)
+                    response = self._call_llm(prompt)
                     break
                 except Exception as exc:
                     last_exc = exc

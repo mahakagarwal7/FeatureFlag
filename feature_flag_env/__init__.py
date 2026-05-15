@@ -11,11 +11,18 @@ import sys
 from pathlib import Path
 
 # Ensure the nested feature-flag-agent-env directory is in the Python path
+# and add the nested package implementation path to this package search path.
 # This allows imports like "from feature_flag_env.server import app" to work
-# when the actual code is at feature-flag-agent-env/feature_flag_env/
+# when the actual code is at feature-flag-agent-env/feature_flag_env/.
 _FEATURE_FLAG_ENV_ROOT = Path(__file__).resolve().parents[1] / "feature-flag-agent-env"
+_FEATURE_FLAG_ENV_PACKAGE = _FEATURE_FLAG_ENV_ROOT / "feature_flag_env"
 
 if _FEATURE_FLAG_ENV_ROOT.is_dir():
     _path_str = str(_FEATURE_FLAG_ENV_ROOT)
     if _path_str not in sys.path:
         sys.path.insert(0, _path_str)
+
+    if _FEATURE_FLAG_ENV_PACKAGE.is_dir():
+        _pkg_path_str = str(_FEATURE_FLAG_ENV_PACKAGE)
+        if _pkg_path_str not in __path__:
+            __path__.append(_pkg_path_str)

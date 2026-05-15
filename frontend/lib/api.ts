@@ -6,19 +6,15 @@
 const API_BASE_URL_STORAGE_KEY = "feature_flag_api_base_url";
 const API_KEY_STORAGE_KEY = "feature_flag_api_key";
 
-const ENV_BASE_URL = process.env.NEXT_PUBLIC_API_URL?.trim();
-const DEFAULT_BASE_URLS = [
-  "http://127.0.0.1:8000",
-  "http://127.0.0.1:7860",
-  "http://localhost:8000",
-  "http://localhost:7860",
-];
-
 let resolvedBaseUrl: string | null = null;
 
 function normalizeBaseUrl(url: string): string {
   return url.replace(/\/$/, "");
 }
+
+const normalizeUrl = (base: string, endpoint: string): string => {
+  return `${base.replace(/\/+$/, '')}/${endpoint.replace(/^\/+/, '')}`;
+};
 
 function readStoredBaseUrl(): string | null {
   if (typeof window === "undefined") return null;
@@ -26,18 +22,63 @@ function readStoredBaseUrl(): string | null {
   return stored ? normalizeBaseUrl(stored) : null;
 }
 
-function getCandidateBaseUrls(): string[] {
-  const candidates = [
-    readStoredBaseUrl(),
-    ENV_BASE_URL ? normalizeBaseUrl(ENV_BASE_URL) : null,
-    ...DEFAULT_BASE_URLS,
-  ].filter((value): value is string => Boolean(value));
+/**
+ * Resolve API base URL with environment awareness.
+ * Priority: 1) Runtime env var, 2) Build-time env var, 3) Fallback defaults
+ */
+export const getApiBaseUrl = (): string => {
+  // Client-side: Use NEXT_PUBLIC_ prefixed vars (exposed to browser)
+  if (typeof window !== 'undefined') {
+    return (
+      process.env.NEXT_PUBLIC_API_BASE_URL ||
+      (process.env.NEXT_PUBLIC_VERCEL_URL ? `https://${process.env.NEXT_PUBLIC_VERCEL_URL}/api` : undefined) ||
+      'http://localhost:8000' // Local dev fallback
+    );
+  }
+  
+  // Server-side (Node.js): Use non-prefixed vars
+  return (
+    process.env.API_BASE_URL ||
+    (process.env.ENV_HOST && process.env.ENV_PORT ? `http://${process.env.ENV_HOST}:${process.env.ENV_PORT}` : undefined) ||
+    'http://localhost:8000'
+  );
+};
 
-  return [...new Set(candidates)];
-}
+/**
+ * Create a fetch wrapper with automatic base URL and error handling
+ */
+export const apiFetch = async (
+  endpoint: string,
+  options: RequestInit = {}
+): Promise<Response> => {
+  const baseUrl = getApiBaseUrl();
+  const url = normalizeUrl(baseUrl, endpoint);
+  
+  const config: RequestInit = {
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+    ...options,
+  };
+  
+  try {
+    const response = await fetch(url, config);
+    
+    // Log errors in development
+    if (process.env.NODE_ENV === 'development' && !response.ok) {
+      console.error(`API Error: ${response.status} ${response.statusText} at ${url}`);
+    }
+    
+    return response;
+  } catch (error) {
+    console.error(`Network error fetching ${url}:`, error);
+    throw new Error(`Failed to connect to API at ${baseUrl}. Is the backend running?`);
+  }
+};
 
-function makeConnectionErrorMessage(): string {
-  return "Unable to reach backend API. Verify backend is running and set NEXT_PUBLIC_API_URL (or API Base URL in Settings).";
+function makeConnectionErrorMessage(baseUrl: string): string {
+  return `Failed to connect to API at ${baseUrl}. Is the backend running?`;
 }
 
 async function parseResponse(res: Response): Promise<unknown> {
@@ -46,35 +87,6 @@ async function parseResponse(res: Response): Promise<unknown> {
     return res.json();
   }
   return res.text();
-}
-
-async function resolveBaseUrl(getHeaders: () => HeadersInit): Promise<string> {
-  if (resolvedBaseUrl) return resolvedBaseUrl;
-
-  const urls = getCandidateBaseUrls();
-  let lastError: unknown = null;
-
-  for (const base of urls) {
-    try {
-      const res = await fetch(`${base}/health`, {
-        method: "GET",
-        headers: getHeaders(),
-      });
-
-      if (res.ok) {
-        resolvedBaseUrl = base;
-        return base;
-      }
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  if (lastError) {
-    throw new Error(makeConnectionErrorMessage());
-  }
-
-  throw new Error(makeConnectionErrorMessage());
 }
 
 export interface Observation {
@@ -228,9 +240,19 @@ function normalizeDashboard(raw: any): DashboardData {
 }
 
 export const api = {
-  getApiBaseUrl(): string | null {
-    return readStoredBaseUrl() || (ENV_BASE_URL ? normalizeBaseUrl(ENV_BASE_URL) : null);
+  getApiBaseUrl(): string {
+    return getApiBaseUrl();
   },
+
+  get: (endpoint: string, options?: RequestInit) => 
+    apiFetch(endpoint, { ...options, method: 'GET' }),
+  
+  post: (endpoint: string, body: any, options?: RequestInit) => 
+    apiFetch(endpoint, { 
+      ...options, 
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 
   setApiBaseUrl(url: string) {
     if (typeof window !== "undefined") {
@@ -263,20 +285,13 @@ export const api = {
   },
 
   async request<T>(path: string, init: RequestInit = {}): Promise<T> {
-    const base = await resolveBaseUrl(() => this.getHeaders());
-
-    let res: Response;
-    try {
-      res = await fetch(`${base}${path}`, {
-        ...init,
-        headers: {
-          ...this.getHeaders(),
-          ...(init.headers || {}),
-        },
-      });
-    } catch {
-      throw new Error(makeConnectionErrorMessage());
-    }
+    const res = await apiFetch(path, {
+      ...init,
+      headers: {
+        ...this.getHeaders(),
+        ...(init.headers || {}),
+      },
+    });
 
     if (!res.ok) {
       let message = `Request failed (${res.status})`;

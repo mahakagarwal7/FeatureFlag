@@ -126,6 +126,7 @@ async def lifespan(app: FastAPI):
     Lifespan context manager for startup/shutdown events.
     Replaces deprecated @app.on_event("startup")
     """
+    # Startup: Initialize database singleton
     # Startup: Initialize environment
     global environment
     environment = FeatureFlagEnvironment(
@@ -166,6 +167,23 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ✅ Initialize monitoring and database singletons
+if DATABASE_AVAILABLE and database:
+    database.init_app(app)
+
+try:
+    from feature_flag_env.utils.monitoring import MonitoringManager
+    monitoring = MonitoringManager.get_instance()
+    monitoring.init_app(app)
+    
+    if os.getenv("FF_DEBUG_MONITORING", "0") == "1":
+        print("[APP] Monitoring module initialized", file=sys.stderr)
+except ImportError:
+    if os.getenv("FF_DEBUG_MONITORING", "0") == "1":
+        print("[APP] Monitoring module not available (optional)", file=sys.stderr)
+except Exception as e:
+    logger.warning(f"[APP] Monitoring init failed: {e}")
 
 
 # =========================

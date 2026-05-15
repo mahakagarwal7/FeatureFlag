@@ -13,8 +13,8 @@ _project_root = Path(__file__).resolve().parents[1] / "feature-flag-agent-env"
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-# Import and re-export the actual app
-from server.app import app  # noqa: F401
+# Import and re-export the actual app from the nested implementation package.
+from feature_flag_env.server.app import app  # noqa: F401
 
 __all__ = ["app", "main"]
 

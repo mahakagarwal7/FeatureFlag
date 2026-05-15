@@ -407,6 +407,24 @@ class StakeholderPanel:
             self._belief_tracker.update(fbs)
         return fbs
 
+    def get_feedback(self, observation: FeatureFlagObservation) -> dict:
+        """
+        Generate structured feedback from simulated stakeholders.
+        Returns dict with consensus_score, conflict_level, and per-stakeholder comments.
+        """
+        # Example implementation using existing FeedbackVector logic
+        vector = self.get_feedback_vector(observation)
+        
+        return {
+            "consensus_score": round(vector.consensus_score, 2),
+            "conflict_level": round(vector.conflict_level, 2),
+            "stakeholders": {
+                "devops": {"score": vector.devops_score, "comment": vector.devops_message},
+                "product": {"score": vector.product_score, "comment": vector.product_message},
+                "customer": {"score": vector.customer_score, "comment": vector.customer_message},
+            }
+        }
+
     def get_feedback_vector(
         self, observation: FeatureFlagObservation
     ) -> FeedbackVector:
