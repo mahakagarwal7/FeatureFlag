@@ -13,6 +13,16 @@ except ImportError:  # Keep agent usable even if dotenv isn't installed.
 
 from feature_flag_env.models import FeatureFlagAction, FeatureFlagObservation
 
+try:
+    from langfuse import observe
+except ImportError:
+    def observe(*args, **kwargs):
+        def decorator(func):
+            return func
+        if len(args) == 1 and callable(args[0]):
+            return args[0]
+        return decorator
+
 
 if load_dotenv is not None:
     # Load environment variables from common .env locations.
@@ -97,10 +107,10 @@ class LLMAgent:
                     )
                     self.use_baseline = False
                     
-                    # Optional: Log initialization for debugging
                     if os.getenv("FF_DEBUG_API", "0") == "1":
                         print(f"[LLM DEBUG] Groq client initialized (model={self.model})", file=sys.stderr)
                         
+
             except ImportError:
                 print("WARNING: groq package not installed. Install with: pip install groq", file=sys.stderr)
                 self.use_baseline = True
@@ -120,11 +130,15 @@ class LLMAgent:
                 if self.provider == "openai":
                     try:
                         from openai import OpenAI
+                            
                         self.client = OpenAI(
                             api_key=self.api_key,
                             base_url=self.api_base_url,
                             timeout=self.timeout_seconds,
                         )
+
+
+
                     except ImportError:
                         print("WARNING: openai package not installed. Using fallback.", file=sys.stderr)
                         self.use_baseline = True
@@ -294,6 +308,7 @@ class LLMAgent:
 
         raise ValueError("Unexpected Hugging Face response format")
 
+    @observe(as_type="generation")
     def _call_llm(self, prompt: str) -> str:
         """ Unified LLM call supporting Groq, OpenAI, and HF providers."""
         
@@ -315,9 +330,12 @@ class LLMAgent:
             return self._call_openai_completion(prompt)
             
         elif self.provider == "hf":
-            return self._call_hf_completion(prompt)
+            response_text = self._call_hf_completion(prompt)
             
-        raise RuntimeError(f"LLM provider '{self.provider}' not properly configured")
+        else:
+            raise RuntimeError(f"LLM provider '{self.provider}' not properly configured")
+            
+        return response_text
 
     def decide(self, observation: FeatureFlagObservation, history):
         if self.use_baseline:

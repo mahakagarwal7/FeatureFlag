@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { useUser } from "@clerk/nextjs";
 import { api, Observation } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -25,6 +26,9 @@ export function FlagDetailClient() {
   const params = useParams();
   const router = useRouter();
   const id = params.id as string;
+  const { user } = useUser();
+  const isManager = user?.publicMetadata?.role === "Manager";
+
   
   const { state } = useEnv();
   const [isOn, setIsOn] = useState(true);
@@ -96,7 +100,12 @@ export function FlagDetailClient() {
     }
   };
 
+  const handleApprove = () => {
+    setMessage("Feature approved by Manager.");
+  };
+
   return (
+
     <div className="flex-1 space-y-6 p-8">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
@@ -115,6 +124,13 @@ export function FlagDetailClient() {
         </div>
         
         <div className="flex items-center gap-3">
+          <Button 
+            disabled={!isManager} 
+            onClick={handleApprove} 
+            className="rounded-full bg-green-600 hover:bg-green-700 text-white shadow-md shadow-green-600/20"
+          >
+            Approve Feature
+          </Button>
           {hasChanges && (
             <Button onClick={handleSave} className="rounded-full bg-primary shadow-md shadow-primary/20">
               <Save className="mr-2 h-4 w-4" />
@@ -122,6 +138,7 @@ export function FlagDetailClient() {
             </Button>
           )}
         </div>
+
       </div>
 
       {message ? (

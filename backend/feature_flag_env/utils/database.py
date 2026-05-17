@@ -19,6 +19,12 @@ from datetime import datetime
 from threading import Lock
 from typing import Any, Dict
 
+try:
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+except ImportError:
+    psycopg2 = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -27,6 +33,7 @@ class DatabaseConfig:
     enabled: bool = os.getenv("ENABLE_DATABASE", "false").lower() == "true"
     path: str = os.getenv("DATABASE_PATH", "logs/app.db")
     timeout_seconds: float = float(os.getenv("DATABASE_TIMEOUT_SECONDS", "5.0"))
+    url: str = os.getenv("DATABASE_URL", "")
 
 
 class DatabaseManager:
@@ -44,6 +51,8 @@ class DatabaseManager:
         self.config = DatabaseConfig()
         self._lock = Lock()
         self._last_error: str | None = None
+        self.is_postgres = bool(self.config.url and self.config.url.startswith("postgres"))
+
 
         if self.config.enabled:
             self.initialize()
@@ -79,14 +88,24 @@ class DatabaseManager:
 
     @contextmanager
     def _connect(self):
-        db_path = self.config.path
-        os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
-        conn = sqlite3.connect(db_path, timeout=self.config.timeout_seconds)
-        try:
-            yield conn
-            conn.commit()
-        finally:
-            conn.close()
+        if self.is_postgres:
+            if psycopg2 is None:
+                raise RuntimeError("psycopg2 is required for PostgreSQL")
+            conn = psycopg2.connect(self.config.url)
+            try:
+                yield conn
+                conn.commit()
+            finally:
+                conn.close()
+        else:
+            db_path = self.config.path
+            os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
+            conn = sqlite3.connect(db_path, timeout=self.config.timeout_seconds)
+            try:
+                yield conn
+                conn.commit()
+            finally:
+                conn.close()
 
     def initialize(self) -> None:
         if not self.config.enabled:
@@ -96,10 +115,11 @@ class DatabaseManager:
             with self._lock:
                 with self._connect() as conn:
                     cur = conn.cursor()
+                    pk_type = "SERIAL PRIMARY KEY" if self.is_postgres else "INTEGER PRIMARY KEY AUTOINCREMENT"
                     cur.execute(
-                        """
+                        f"""
                         CREATE TABLE IF NOT EXISTS episode_events (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            id {pk_type},
                             ts TEXT NOT NULL,
                             event_type TEXT NOT NULL,
                             episode_id TEXT,
@@ -120,11 +140,11 @@ class DatabaseManager:
                         """
                     )
                     cur.execute(
-                        """
+                        f"""
                         CREATE TABLE IF NOT EXISTS audit_events (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            id {pk_type},
                             ts TEXT NOT NULL,
-                            user TEXT,
+                            user_id TEXT,
                             action TEXT,
                             endpoint TEXT,
                             method TEXT,
@@ -147,7 +167,7 @@ class DatabaseManager:
                     )
         except Exception as exc:
             self._last_error = str(exc)
-            logger.error("SQLite initialization failed: %s", exc)
+            logger.error("Database initialization failed: %s", exc)
 
     def is_enabled(self) -> bool:
         return self.config.enabled
@@ -165,8 +185,10 @@ class DatabaseManager:
         error = self._last_error
         try:
             with self._connect() as conn:
-                conn.execute("SELECT 1")
+                cur = conn.cursor()
+                cur.execute("SELECT 1")
             connected = True
+
         except Exception as exc:
             error = str(exc)
             self._last_error = error
@@ -226,14 +248,19 @@ class DatabaseManager:
             payload = json.dumps(metadata or {}, default=str)
             with self._lock:
                 with self._connect() as conn:
-                    conn.execute(
-                        """
+                    cur = conn.cursor()
+                    query = """
                         INSERT INTO episode_events (
                             ts, event_type, episode_id, scenario_name, difficulty,
                             step_count, feature_name, target_percentage, error_rate,
                             metadata_json
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
+                        ) VALUES ({}, {}, {}, {}, {}, {}, {}, {}, {}, {})
+                        """
+                    placeholders = ",".join(["%s" if self.is_postgres else "?"] * 10)
+                    query = query.replace("{}, {}, {}, {}, {}, {}, {}, {}, {}, {}", placeholders)
+                    
+                    cur.execute(
+                        query,
                         (
                             datetime.utcnow().isoformat(),
                             "reset",
@@ -249,7 +276,7 @@ class DatabaseManager:
                     )
         except Exception as exc:
             self._last_error = str(exc)
-            logger.warning("SQLite episode reset write failed: %s", exc)
+            logger.warning("Database episode reset write failed: %s", exc)
 
     def record_step(
         self,
@@ -272,14 +299,18 @@ class DatabaseManager:
             payload = json.dumps(metadata or {}, default=str)
             with self._lock:
                 with self._connect() as conn:
-                    conn.execute(
-                        """
+                    cur = conn.cursor()
+                    query = """
                         INSERT INTO episode_events (
                             ts, event_type, episode_id, step_count, action_type,
                             target_percentage, reward, error_rate, latency_p99_ms,
                             system_health_score, done, reason, metadata_json
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
+                        ) VALUES ({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})
+                        """
+                    placeholders = ",".join(["%s" if self.is_postgres else "?"] * 13)
+                    query = query.replace("{}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}", placeholders)
+                    cur.execute(
+                        query,
                         (
                             datetime.utcnow().isoformat(),
                             "step",
@@ -298,7 +329,7 @@ class DatabaseManager:
                     )
         except Exception as exc:
             self._last_error = str(exc)
-            logger.warning("SQLite step write failed: %s", exc)
+            logger.warning("Database step write failed: %s", exc)
 
     def record_audit_event(
         self,
@@ -317,12 +348,16 @@ class DatabaseManager:
             payload = json.dumps(details or {}, default=str)
             with self._lock:
                 with self._connect() as conn:
-                    conn.execute(
-                        """
+                    cur = conn.cursor()
+                    query = """
                         INSERT INTO audit_events (
-                            ts, user, action, endpoint, method, status_code, details_json
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                        """,
+                            ts, user_id, action, endpoint, method, status_code, details_json
+                        ) VALUES ({}, {}, {}, {}, {}, {}, {})
+                        """
+                    placeholders = ",".join(["%s" if self.is_postgres else "?"] * 7)
+                    query = query.replace("{}, {}, {}, {}, {}, {}, {}", placeholders)
+                    cur.execute(
+                        query,
                         (
                             ts,
                             user,
@@ -335,7 +370,7 @@ class DatabaseManager:
                     )
         except Exception as exc:
             self._last_error = str(exc)
-            logger.warning("SQLite audit write failed: %s", exc)
+            logger.warning("Database audit write failed: %s", exc)
 
 
 # Compatibility aliases

@@ -16,12 +16,15 @@ export const metadata: Metadata = {
   description: "Advanced Feature Flag Management & Experimentation",
 };
 
+import { ClerkProvider } from '@clerk/nextjs'
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
   return (
+    <ClerkProvider>
     <html
       lang="en"
       className={`${inter.variable} h-full antialiased`}
@@ -47,5 +50,6 @@ export default function RootLayout({
         </ThemeProvider>
       </body>
     </html>
+    </ClerkProvider>
   );
 }

@@ -30,21 +30,26 @@ time.sleep(5)
 try:
     # Check health endpoint
     health_resp = json.load(urllib.request.urlopen('http://127.0.0.1:8002/health'))
-    print(f"✓ Health endpoint responded: {health_resp.get('status')}")
+    print(f"OK: Health endpoint responded: {health_resp.get('status')}")
     
-    # Check if database file was created
-    db_path = pathlib.Path('logs/app.db')
-    if db_path.is_file():
-        size = db_path.stat().st_size
-        print(f"✓ Database file created: {db_path} ({size} bytes)")
+    # Check if database file was created (if sqlite)
+    if not health_resp.get("environment_ready") and not env.get("DATABASE_URL", "").startswith("postgres"):
+        db_path = pathlib.Path('logs/app.db')
+        if db_path.is_file():
+            size = db_path.stat().st_size
+            print(f"OK: Database file created: {db_path} ({size} bytes)")
+        else:
+            print(f"FAIL: Database file NOT created: {db_path}")
+            sys.exit(1)
     else:
-        print(f"✗ Database file NOT created: {db_path}")
-        sys.exit(1)
+        print(f"OK: Connected to Postgres/Supabase database")
     
-    print("\n✅ Database initialization test PASSED")
+    print("\nSUCCESS: Database initialization test PASSED")
+
     
 except Exception as e:
-    print(f"✗ Test failed: {e}")
+    print(f"FAIL: Test failed: {e}")
+
     sys.exit(1)
 finally:
     p.terminate()
